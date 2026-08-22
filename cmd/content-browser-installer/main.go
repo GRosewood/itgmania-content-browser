@@ -1,5 +1,6 @@
-// Command find-content-installer installs the SMO Find Content module into an
-// ITGmania installation and enables the network allowlist it needs.
+// Command itgmania-content-browser-installer installs the ITGMania Content
+// Browser module into an ITGmania installation and enables the network
+// allowlist it needs.
 //
 // It is a single self-contained binary: the module payload is embedded, so
 // there is nothing to unzip and no files for the user to move by hand.
@@ -17,7 +18,10 @@ import (
 	"strconv"
 	"strings"
 
-	"itgmania-find-content/internal/installer"
+	"itgmania-content-browser/internal/assets"
+	"itgmania-content-browser/internal/banner"
+	"itgmania-content-browser/internal/branding"
+	"itgmania-content-browser/internal/installer"
 )
 
 //go:embed all:payload
@@ -32,15 +36,29 @@ func main() {
 		uninstallFlag = flag.Bool("uninstall", false, "remove the module files")
 		listFlag      = flag.Bool("list", false, "list detected ITGmania installations and exit")
 		versionFlag   = flag.Bool("version", false, "print version and exit")
+		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
+		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
 	)
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("find-content-installer %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("%s-installer %s (%s/%s)\n", branding.Slug, version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("%s by %s\n", branding.Name, branding.Author)
 		return
 	}
 
-	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag)
+	// -detect is consumed by the graphical installers, so it prints nothing
+	// but the path (or nothing at all) and never draws chrome.
+	if *detectFlag {
+		installs := installer.Discover()
+		if len(installs) == 0 {
+			os.Exit(1)
+		}
+		fmt.Println(installs[0].Root)
+		os.Exit(0)
+	}
+
+	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag)
 	// Double-clicked on Windows: keep the console up so the result is readable.
 	if runtime.GOOS == "windows" && !*yesFlag && isDoubleClicked() {
 		fmt.Print("\nPress Enter to close...")
@@ -49,10 +67,18 @@ func main() {
 	os.Exit(code)
 }
 
-func run(target string, assumeYes, uninstall, listOnly bool) int {
+func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
 	fmt.Println()
-	fmt.Println("  SMO Find Content installer for ITGmania")
-	fmt.Println("  =======================================")
+	if !noBanner && !listOnly {
+		if banner.Render(os.Stdout, assets.FS, assets.BannerPath, banner.TerminalWidth()-2) {
+			fmt.Println()
+		}
+	}
+	title := branding.Name + " installer"
+	fmt.Println("  " + title)
+	fmt.Println("  " + strings.Repeat("=", len(title)))
+	fmt.Println("  " + branding.Tagline)
+	fmt.Println("  by " + branding.Author)
 	fmt.Println()
 
 	modules, err := fs.Sub(payloadFS, "payload/Modules")
@@ -79,11 +105,11 @@ func run(target string, assumeYes, uninstall, listOnly bool) int {
 		fmt.Println("  Re-run with the path to your install, for example:")
 		switch runtime.GOOS {
 		case "windows":
-			fmt.Println(`    find-content-installer.exe -install-dir "C:\Games\ITGmania"`)
+			fmt.Println(`    itgmania-content-browser-installer.exe -install-dir "C:\Games\ITGmania"`)
 		case "darwin":
-			fmt.Println("    ./find-content-installer -install-dir /Applications/ITGmania.app")
+			fmt.Println("    ./itgmania-content-browser-installer -install-dir /Applications/ITGmania.app")
 		default:
-			fmt.Println("    ./find-content-installer -install-dir ~/.itgmania")
+			fmt.Println("    ./itgmania-content-browser-installer -install-dir ~/.itgmania")
 		}
 		return 1
 	}
@@ -149,6 +175,14 @@ func run(target string, assumeYes, uninstall, listOnly bool) int {
 		return fail("%v", err)
 	}
 
+	if len(res.Replaced) > 0 {
+		fmt.Println("  Replaced older files:")
+		for _, name := range res.Replaced {
+			fmt.Printf("    %s\n", name)
+		}
+		fmt.Println()
+	}
+
 	fmt.Println("  Installed:")
 	for _, name := range res.Written {
 		fmt.Printf("    %s\n", name)
@@ -176,7 +210,7 @@ func run(target string, assumeYes, uninstall, listOnly bool) int {
 	}
 
 	fmt.Println()
-	fmt.Println("  Done. Start ITGmania - \"Find Content\" is on the title menu, below Exit.")
+	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, below Exit.\n", branding.MenuLabel)
 	return 0
 }
 

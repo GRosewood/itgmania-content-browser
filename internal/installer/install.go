@@ -16,7 +16,36 @@ type ModuleFiles fs.FS
 type InstallResult struct {
 	ModulesDir string
 	Written    []string
+	Replaced   []string // superseded files removed during an upgrade
 	Prefs      PrefsResult
+}
+
+// legacyFiles are names shipped by earlier versions of this module. They must
+// be deleted on upgrade: Simply Love loads every .lua in Modules/, so a stale
+// copy alongside the current one would register the title-menu entry twice.
+var legacyFiles = []string{
+	"SMO Find Content.lua",
+	"SMO Find Content README.md",
+	// short-lived watcher-launcher experiment
+	"Launch ITGmania.bat",
+	"Launch ITGmania.ps1",
+	"launch-itgmania.sh",
+}
+
+// removeLegacy deletes superseded files from a Modules directory and reports
+// which ones were there.
+func removeLegacy(modulesDir string) []string {
+	var removed []string
+	for _, name := range legacyFiles {
+		p := filepath.Join(modulesDir, name)
+		if !isFile(p) {
+			continue
+		}
+		if err := os.Remove(p); err == nil {
+			removed = append(removed, name)
+		}
+	}
+	return removed
 }
 
 // Apply copies the module payload into the install's Simply Love theme and
@@ -33,6 +62,8 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 	if err := os.MkdirAll(res.ModulesDir, 0o755); err != nil {
 		return res, fmt.Errorf("creating %s: %w", res.ModulesDir, err)
 	}
+
+	res.Replaced = removeLegacy(res.ModulesDir)
 
 	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -74,7 +105,7 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 // things may rely on the hosts, and removing them is a one-line manual edit.
 func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 	modulesDir := filepath.Join(inst.SimplyLoveDir(), "Modules")
-	var removed []string
+	removed := removeLegacy(modulesDir)
 
 	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

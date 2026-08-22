@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup for the SMO Find Content module (Linux / macOS).
+# One-time setup for the ITGMania Content Browser module (Linux / macOS).
 #
 # ITGmania deliberately prevents themes from granting themselves network
 # access: HttpEnabled/HttpAllowHosts are immutable preferences and the
@@ -18,7 +18,7 @@ NEW_HOSTS=("stepmaniaonline.net" "*.stepmaniaonline.net")
 
 die() { printf '\n  %s\n\n' "$1" >&2; exit 1; }
 
-printf '\n  SMO Find Content - enable network access\n'
+printf '\n  ITGMania Content Browser - enable network access\n'
 printf '  ----------------------------------------\n\n'
 
 # The game rewrites Preferences.ini from memory on exit, so edits made while it

@@ -1,56 +1,68 @@
-# Find Content installer for ITGmania
+# ITGMania Content Browser
 
-One-click installer for **SMO Find Content**, a Simply Love module that adds a
-*Find Content* entry to the ITGmania title menu: an in-game browser for
-[stepmaniaonline.net](https://stepmaniaonline.net) that downloads and installs
-song packs without leaving the game.
+*by GregTech*
 
-Download the binary for your platform, run it, and you're done. It finds your
-ITGmania installation, copies the module into Simply Love, and enables the one
-network setting the module needs. No unzipping, no editing config files, no
-moving files by hand.
+A Simply Love module that adds a **Find Content** entry to the ITGmania title
+menu: an in-game browser for [stepmaniaonline.net](https://stepmaniaonline.net)
+that downloads and installs song packs without leaving the game.
+
+Featured picks, pad/keyboard filtering, banners, chart details and difficulty
+histograms, search, and one-button downloads that unzip straight into `/Songs`.
 
 ## Install
 
-1. Download the binary for your platform from
-   [Releases](../../releases/latest):
+Download the installer for your platform from
+[Releases](../../releases/latest) and run it. It finds your ITGmania
+installation, copies the module into Simply Love, and enables the one network
+setting the module needs.
 
-   | Platform | File |
-   |---|---|
-   | Windows (x64) | `find-content-installer-windows-amd64.exe` |
-   | Windows (ARM64) | `find-content-installer-windows-arm64.exe` |
-   | macOS (Apple silicon) | `find-content-installer-macos-arm64` |
-   | macOS (Intel) | `find-content-installer-macos-amd64` |
-   | Linux (x64) | `find-content-installer-linux-amd64` |
-   | Linux (ARM64) | `find-content-installer-linux-arm64` |
+| Platform | File | What you get |
+|---|---|---|
+| **Windows** | `itgmania-content-browser-setup-<version>.exe` | Graphical setup wizard |
+| **macOS** | `itgmania-content-browser-setup-<version>.pkg` | Installer.app package |
+| **Linux** | `itgmania-content-browser-installer-linux-amd64` (or `-arm64`) | Console installer |
 
-2. **Close ITGmania**, then run it.
-   * Windows: double-click the `.exe`.
-   * macOS / Linux: `chmod +x find-content-installer-*` then run it from a
-     terminal.
-3. Start ITGmania. **Find Content** is on the title menu, below Exit.
+**Close ITGmania first.** ITGmania rewrites `Preferences.ini` from memory when
+it exits, so the installers refuse to run while it is open.
 
-macOS marks downloads from the internet as quarantined; if Gatekeeper blocks
-it, either right-click → Open, or clear the flag:
-`xattr -d com.apple.quarantine find-content-installer-macos-*`.
+On macOS and Linux you may need `chmod +x` first, and macOS marks downloads as
+quarantined — right-click → Open, or
+`xattr -d com.apple.quarantine <file>`.
 
-## What it does
+Then start ITGmania: **Find Content** is on the title menu, below Exit.
 
-* Detects ITGmania automatically — portable and non-portable layouts, every
-  release, on all three platforms. Falls back to `-install-dir` if your install
-  lives somewhere unusual, and asks which to use if you have several.
-* Copies the module into `Themes/Simply Love/Modules/`.
-* Adds `stepmaniaonline.net` to `HttpAllowHosts` in your `Preferences.ini` and
-  makes sure `HttpEnabled=1`.
+### Console installer
 
-The preferences edit **keeps every host already on your allowlist** (GrooveStats
-keeps working), changes exactly one line, writes a timestamped `.bak` next to
-the file, and writes atomically so an interrupted run cannot corrupt it. Running
-the installer twice is harmless — it reports "already enabled" and touches
-nothing.
+Every platform also ships the plain console installer, which is what the
+graphical ones drive underneath. Useful for scripting and cabinets:
 
-It refuses to run while ITGmania is open, because ITGmania rewrites
-`Preferences.ini` from memory when it exits and would discard the change.
+```
+itgmania-content-browser-installer [flags]
+
+  -install-dir <path>   ITGmania install directory (default: auto-detect)
+  -list                 list detected installations and exit
+  -detect               print the best-guess install directory (for front-ends)
+  -y                    don't prompt; use the first detected install
+  -uninstall            remove the module files
+  -no-banner            don't draw the artwork banner
+  -version              print version and exit
+```
+
+## What the installer does
+
+* **Finds ITGmania automatically** — portable and non-portable layouts, every
+  release, on all three platforms. Pick a folder manually if yours lives
+  somewhere unusual; the Windows wizard pre-fills the detected path and lets
+  you Browse.
+* **Copies the module** into `Themes/Simply Love/Modules/`, removing files from
+  older versions so the module never loads twice.
+* **Enables network access** by adding `stepmaniaonline.net` to
+  `HttpAllowHosts` in `Preferences.ini` and setting `HttpEnabled=1`.
+
+The preferences edit keeps every host already on your allowlist (GrooveStats
+keeps working), changes exactly one line, preserves CRLF endings, writes a
+timestamped `.bak` next to the file, and writes atomically so an interrupted
+run cannot corrupt it. Running it twice is harmless.
 
 ### Why the allowlist step is needed
 
@@ -61,46 +73,18 @@ ITGmania does not let a theme grant itself internet access. `HttpEnabled` and
 file layer; and the Lua sandbox has no `os`/`io` library and no way to launch a
 program. That is a deliberate boundary — themes are untrusted content.
 
-So the privileged edit is done by this installer, which you run yourself,
-outside the game. The module never asks for permission in-game and never tries
-to change the setting behind your back; if the setting is missing it simply
-shows a warning telling you how to fix it.
-
-## Usage
-
-```
-find-content-installer [flags]
-
-  -install-dir <path>   ITGmania install directory (default: auto-detect)
-  -list                 list detected installations and exit
-  -y                    don't prompt; use the first detected install
-  -uninstall            remove the module files
-  -version              print version and exit
-```
-
-Examples:
-
-```bash
-# see what it finds
-./find-content-installer -list
-
-# install to a specific location, no prompts
-./find-content-installer -install-dir "D:\Games\ITGmania" -y
-
-# remove the module (leaves the allowlist alone)
-./find-content-installer -uninstall
-```
+So the privileged edit is done by this installer, which you run yourself. The
+module never asks for permission in-game and never changes the setting behind
+your back; if the setting is missing it shows a **Network Access Not Enabled**
+warning naming the exact problem and how to fix it.
 
 ## If something goes wrong
 
-The module shows a **Network Access Not Enabled** warning inside the game if
-the allowlist is not right. Fix it by running this installer again, or — with
-ITGmania closed — by running `Enable Network Access.bat` (Windows) or
-`enable-network-access.sh` (macOS/Linux) from
-`Themes/Simply Love/Modules/`. Both are plain-text and safe to read first.
-
-To do it entirely by hand, add this to the `HttpAllowHosts` line in
-`Save/Preferences.ini` while the game is closed:
+Run the installer again. Or, with ITGmania closed, run
+`Enable Network Access.bat` (Windows) / `enable-network-access.sh`
+(macOS/Linux) from `Themes/Simply Love/Modules/` — both are plain text and
+safe to read first. To do it by hand, add this to the `HttpAllowHosts` line in
+`Save/Preferences.ini`:
 
 ```
 stepmaniaonline.net,*.stepmaniaonline.net
@@ -108,45 +92,66 @@ stepmaniaonline.net,*.stepmaniaonline.net
 
 ## Requirements
 
-* ITGmania **1.1 or newer** (the module uses `NETWORK:HttpRequest`, added in
-  0.5.1; tested against 1.3.0).
-* The **Simply Love** theme — this is a Simply Love add-on. ITGmania ships it
-  by default.
+* ITGmania **1.1 or newer** (the module uses `NETWORK:HttpRequest`; tested
+  against 1.3.0).
+* The **Simply Love** theme, which ITGmania ships by default.
 
 ## Building from source
 
-Requires Go 1.21+ (no C toolchain; `CGO_ENABLED=0` throughout, so one machine
-cross-compiles every target).
+Go 1.21+ is the only hard requirement; `CGO_ENABLED=0` throughout, so one
+machine cross-compiles every binary.
 
 ```bash
 go test ./...
-./build.sh 1.0.0     # writes every platform binary to dist/
+./build.sh 1.0.0          # all six binaries -> dist/
 ```
 
-The module payload lives in `cmd/find-content-installer/payload/Modules/` and is
-embedded into the binary with `go:embed`, so each artifact is fully
-self-contained.
+`build.sh` also produces the graphical installers when their toolchain is
+present, and says so when it is skipping one:
 
-CI (`.github/workflows/release.yml`) vets, tests and gofmt-checks on every push,
-and publishes all six binaries plus `SHA256SUMS.txt` when a `v*` tag is pushed.
+* **Windows setup.exe** needs [Inno Setup 6](https://jrsoftware.org/isdl.php).
+  Point at it with `ISCC=/path/to/ISCC.exe` if it is not in Program Files.
+* **macOS .pkg** needs macOS (`pkgbuild`/`productbuild`).
+
+CI builds all of them: the Windows job installs Inno Setup, a macOS job builds
+the `.pkg`, and a `v*` tag publishes everything with `SHA256SUMS.txt`.
+
+Artwork lives in `internal/assets/banner.jpg` and is embedded into the binary.
+After changing it, regenerate the installer images:
+
+```bash
+go run ./tools/mkwizardart
+```
 
 If you fork and publish this, change the module path in `go.mod` from
-`itgmania-find-content` to your own (e.g. `github.com/you/itgmania-find-content`)
-and update the import in `cmd/find-content-installer/main.go`.
+`itgmania-content-browser` to your own and update the import in
+`cmd/content-browser-installer/main.go`.
 
 ## Layout
 
 ```
-cmd/find-content-installer/    CLI entry point
-  payload/Modules/             the module, embedded into the binary
-internal/installer/
-  discover.go                  finds ITGmania across platforms/layouts
-  prefs.go                     the Preferences.ini allowlist merge (+ tests)
-  install.go                   copies the payload into Simply Love
-  running.go                   refuses to run while the game is open
-build.sh                       cross-compiles every target into dist/
+cmd/content-browser-installer/   console installer (the engine for all platforms)
+  payload/Modules/               the Lua module, embedded into the binary
+internal/
+  assets/                        banner.jpg, embedded
+  banner/                        terminal artwork rendering (+ tests)
+  branding/                      product name, author, slug in one place
+  installer/                     discovery, Preferences.ini merge, copy (+ tests)
+packaging/
+  windows/setup.iss              Inno Setup wizard + generated wizard bitmaps
+  macos/                         productbuild .pkg, background art, postinstall
+tools/mkwizardart/               regenerates installer artwork from banner.jpg
+build.sh                         every binary + available GUI installers
 ```
+
+## Naming
+
+The product is **ITGMania Content Browser**. The in-game menu entry is
+deliberately called **Find Content** — that is what players see on the title
+menu.
 
 ## License
 
-The installer is released under the MIT License; see [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE). The bundled artwork is licensed stock imagery and
+is not covered by the MIT grant — replace `internal/assets/banner.jpg` if you
+redistribute a fork.

@@ -29,33 +29,64 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: windows-latest   # has Inno Setup available for the GUI installer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "stable"
 
-      - name: Cross-compile every target
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Cross-compile every target and build the Windows setup
+        shell: bash
         run: |
           version="${GITHUB_REF_NAME}"
           case "$version" in v*) version="${version#v}" ;; *) version="dev-${GITHUB_SHA::7}" ;; esac
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           ./build.sh "$version"
-
-      - name: Checksums
-        run: |
-          cd dist
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: find-content-installer
+          name: binaries
           path: dist/*
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  macos-pkg:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Build the macOS installer package
+        run: |
+          version="${GITHUB_REF_NAME}"
+          case "$version" in v*) version="${version#v}" ;; *) version="dev-${GITHUB_SHA::7}" ;; esac
+          # only the macOS binaries are needed here; build.sh makes them all
+          ./build.sh "$version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist/*.pkg
+
+  release:
+    needs: [build, macos-pkg]
+    if: startsWith(github.ref, refs/tags/v)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ ;
+          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true

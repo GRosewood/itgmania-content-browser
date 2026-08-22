@@ -1,4 +1,4 @@
-# Enable Network Access.ps1 — one-time setup for the SMO Find Content module.
+# Enable Network Access.ps1 — one-time setup for the ITGMania Content Browser module.
 #
 # ITGmania deliberately prevents themes from granting themselves network
 # access: HttpEnabled/HttpAllowHosts are immutable preferences, and
@@ -29,7 +29,7 @@ function Fail($msg) {
 }
 
 Write-Host ""
-Write-Host "  SMO Find Content - enable network access" -ForegroundColor Cyan
+Write-Host "  ITGMania Content Browser - enable network access" -ForegroundColor Cyan
 Write-Host "  ----------------------------------------"
 Write-Host ""
 

@@ -1,3 +1,3 @@
-module itgmania-find-content
+module itgmania-content-browser
 
 go 1.21

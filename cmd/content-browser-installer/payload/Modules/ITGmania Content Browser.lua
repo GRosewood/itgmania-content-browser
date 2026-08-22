@@ -1,5 +1,6 @@
 -- -----------------------------------------------------------------------
--- SMO Find Content
+-- ITGMania Content Browser
+-- by GregTech
 --
 -- A drop-in Simply Love module that adds a "Find Content" entry to the
 -- title menu (home screen).  It opens an in-game browser for
