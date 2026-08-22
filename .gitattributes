@@ -1,0 +1,14 @@
+# Keep everything LF in the repo by default.
+* text=auto eol=lf
+
+# These must stay LF or they break on the target platform.
+*.sh    text eol=lf
+*.go    text eol=lf
+*.yml   text eol=lf
+
+# Windows-only scripts are happier with CRLF.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# The Lua module is read by the engine on all platforms.
+*.lua   text eol=lf
