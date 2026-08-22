@@ -18,6 +18,9 @@
 #define AppPublisher "GregTech"
 #define AppSlug    "itgmania-content-browser"
 #define CoreExe    "itgmania-content-browser-installer-windows-amd64.exe"
+; Support files live outside the game folder, so the only thing this setup
+; adds to ITGmania is the module itself.
+#define SupportDir "{localappdata}\ITGMania Content Browser"
 
 [Setup]
 AppId={{8E4A2F6C-3B71-4D2E-9C55-7A1E0B9D4F32}
@@ -30,7 +33,8 @@ VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} Setup
 VersionInfoVersion=0.0.0
 UninstallDisplayName={#AppName}
-UninstallDisplayIcon={app}\Themes\Simply Love\Modules\{#CoreExe}
+UninstallDisplayIcon={#SupportDir}\{#CoreExe}
+UninstallFilesDir={#SupportDir}
 
 ; This installs *into an existing ITGmania folder*, so the directory page is
 ; a picker for that folder rather than a normal Program Files destination.
@@ -70,19 +74,18 @@ FinishedHeadingLabel=Finished installing [name]
 FinishedLabelNoIcons=Start ITGmania and look for "Find Content" on the title menu, below Exit.
 
 [Files]
-; The console installer does the real work; keep it beside the module so the
-; uninstaller can call it too.
-Source: "..\..\dist\{#CoreExe}"; DestDir: "{app}\Themes\Simply Love\Modules"; Flags: ignoreversion
+; The console installer does the real work; it lives in LocalAppData.
+Source: "..\..\dist\{#CoreExe}"; DestDir: "{#SupportDir}"; Flags: ignoreversion
 
 [Run]
 ; -y skips the interactive picker; the folder was already chosen in the wizard.
-Filename: "{app}\Themes\Simply Love\Modules\{#CoreExe}"; \
+Filename: "{#SupportDir}\{#CoreExe}"; \
   Parameters: "-install-dir ""{app}"" -y -no-banner"; \
   StatusMsg: "Installing the module and enabling network access..."; \
   Flags: runhidden waituntilterminated
 
 [UninstallRun]
-Filename: "{app}\Themes\Simply Love\Modules\{#CoreExe}"; \
+Filename: "{#SupportDir}\{#CoreExe}"; \
   Parameters: "-install-dir ""{app}"" -uninstall -y -no-banner"; \
   RunOnceId: "RemoveContentBrowser"; \
   Flags: runhidden waituntilterminated
