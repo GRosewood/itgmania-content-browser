@@ -1,18 +1,47 @@
 #!/bin/bash
-# Runs after Installer.app copies the helper into place. It performs the same
-# work as the console installer (auto-detect ITGmania, copy the module, enable
-# the network allowlist) and surfaces failures in Installer.app's log.
+# Runs after Installer.app copies the helper into place: installs the module,
+# enables the network allowlist, and verifies the allowlist actually landed.
+# A non-zero exit makes Installer.app report the failure instead of claiming
+# success, which matters because without the allowlist the module cannot reach
+# stepmaniaonline.net.
 set -uo pipefail
 
 HELPER="/usr/local/share/itgmania-content-browser/itgmania-content-browser-installer"
 [ -x "$HELPER" ] || { echo "helper missing at $HELPER" >&2; exit 1; }
 
 # Installer.app runs as root; detect against the console user's home so
-# ~/Library and ~/.itgmania installs are found.
+# ~/Library and ~/.itgmania installs are found and files stay user-owned.
 CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
-if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
-    su - "$CONSOLE_USER" -c "'$HELPER' -y -no-banner" && exit 0
-    echo "install as $CONSOLE_USER failed; retrying as current user" >&2
+
+run_helper() {
+    if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+        su - "$CONSOLE_USER" -c "'$HELPER' $*" && return 0
+        echo "run as $CONSOLE_USER failed; retrying as root" >&2
+    fi
+    "$HELPER" "$@"
+}
+
+run_helper -y -no-banner || { echo "module installation failed" >&2; exit 1; }
+
+# Confirm the allowlist really is in place rather than trusting the exit code.
+INSTALL_DIR=$(run_helper -detect 2>/dev/null | tail -n1)
+if [ -z "$INSTALL_DIR" ]; then
+    echo "could not determine the ITGmania directory after install" >&2
+    exit 1
 fi
 
-"$HELPER" -y -no-banner
+for PREFS in \
+    "$INSTALL_DIR/Save/Preferences.ini" \
+    "/Users/${CONSOLE_USER:-root}/Library/Application Support/ITGmania/Save/Preferences.ini" \
+    "/Users/${CONSOLE_USER:-root}/.itgmania/Save/Preferences.ini"; do
+    [ -f "$PREFS" ] || continue
+    if grep -qi '^[[:space:]]*HttpAllowHosts=.*stepmaniaonline\.net' "$PREFS" &&
+       grep -qi '^[[:space:]]*HttpEnabled=1' "$PREFS"; then
+        echo "network access enabled in $PREFS"
+        exit 0
+    fi
+done
+
+echo "network access was NOT enabled; add stepmaniaonline.net,*.stepmaniaonline.net" >&2
+echo "to the HttpAllowHosts line in Preferences.ini with ITGmania closed." >&2
+exit 1

@@ -77,13 +77,6 @@ FinishedLabelNoIcons=Start ITGmania and look for "Find Content" on the title men
 ; The console installer does the real work; it lives in LocalAppData.
 Source: "..\..\dist\{#CoreExe}"; DestDir: "{#SupportDir}"; Flags: ignoreversion
 
-[Run]
-; -y skips the interactive picker; the folder was already chosen in the wizard.
-Filename: "{#SupportDir}\{#CoreExe}"; \
-  Parameters: "-install-dir ""{app}"" -y -no-banner"; \
-  StatusMsg: "Installing the module and enabling network access..."; \
-  Flags: runhidden waituntilterminated
-
 [UninstallRun]
 Filename: "{#SupportDir}\{#CoreExe}"; \
   Parameters: "-install-dir ""{app}"" -uninstall -y -no-banner"; \
@@ -208,5 +201,106 @@ begin
              mbError, MB_OK);
       Result := False;
     end;
+  end;
+end;
+
+// ---------------------------------------------------------------------
+// Post-install: run the helper, check that it succeeded, and confirm the
+// allowlist really is in Preferences.ini. A silent failure here would
+// leave the module unable to reach stepmaniaonline.net.
+
+// PrefsPath returns the Preferences.ini this install actually uses:
+// portable installs keep Save/ beside the game, others use %APPDATA%.
+function PrefsPath(AppDir: String): String;
+var
+  Local: String;
+begin
+  Local := AddBackslash(AppDir) + 'Save\Preferences.ini';
+  if FileExists(Local) then
+    Result := Local
+  else
+    Result := ExpandConstant('{userappdata}') + '\ITGmania\Save\Preferences.ini';
+end;
+
+// AllowlistOK mirrors the console installer's own check.
+function AllowlistOK(AppDir: String): Boolean;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  Line, Lower: String;
+  Enabled, Allowed: Boolean;
+begin
+  Enabled := False;
+  Allowed := False;
+  if LoadStringsFromFile(PrefsPath(AppDir), Lines) then
+  begin
+    for I := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      Line := Trim(Lines[I]);
+      Lower := Lowercase(Line);
+      if Pos('httpenabled=', Lower) = 1 then
+        Enabled := (Trim(Copy(Line, Length('HttpEnabled=') + 1, Length(Line))) = '1');
+      if Pos('httpallowhosts=', Lower) = 1 then
+        Allowed := (Pos('stepmaniaonline.net', Lower) > 0);
+    end;
+  end;
+  Result := Enabled and Allowed;
+end;
+
+// InstallFailed lets the finish page tell the truth instead of showing the
+// normal success text after a failed allowlist write.
+var
+  InstallFailed: Boolean;
+  FailureText: String;
+
+procedure Fail(Msg: String);
+begin
+  InstallFailed := True;
+  FailureText := Msg;
+  SuppressibleMsgBox(Msg, mbCriticalError, MB_OK, IDOK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Helper: String;
+  ResultCode: Integer;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+
+  Helper := ExpandConstant('{#SupportDir}\{#CoreExe}');
+  if not FileExists(Helper) then
+  begin
+    Fail('Setup could not find its helper program, so nothing was installed.' + #13#10 + 'Please run the installer again.');
+    Exit;
+  end;
+
+  if not Exec(Helper, '-install-dir "' + ExpandConstant('{app}') + '" -y -no-banner',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Fail('Setup could not run its helper program, so nothing was installed.');
+    Exit;
+  end;
+
+  if ResultCode <> 0 then
+  begin
+    Fail('The module could not be installed.' + #13#10 + '' + #13#10 + 'Close ITGmania, make sure Preferences.ini is writable, then run Setup again.');
+    Exit;
+  end;
+
+  // The point of this installer: without the allowlist entry the module
+  // cannot reach stepmaniaonline.net, so never report success without
+  // reading the file back.
+  if not AllowlistOK(ExpandConstant('{app}')) then
+    Fail('The module was installed, but network access was NOT enabled.' + #13#10 + '' + #13#10 + 'stepmaniaonline.net is missing from HttpAllowHosts in:' + #13#10 + PrefsPath(ExpandConstant('{app}')) + #13#10 + '' + #13#10 + 'With ITGmania closed, run "Enable Network Access.bat" from the' + #13#10 + 'Themes\Simply Love\Modules folder, or run Setup again.');
+end;
+
+// Reflect a failed install on the final page rather than saying it finished.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and InstallFailed then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Setup did not finish successfully';
+    WizardForm.FinishedLabel.Caption := FailureText;
   end;
 end;
