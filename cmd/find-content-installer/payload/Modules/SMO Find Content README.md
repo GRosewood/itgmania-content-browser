@@ -37,55 +37,38 @@ download and install packs without ever leaving the game.
 
 ## Install
 
-1. Copy every file in this folder into `Themes/Simply Love/Modules/` (the
-   `SMO Find Content.lua` module plus the `Enable Network Access` and
-   `Launch ITGmania` helpers).
-2. Enable network access once, either way below.
-3. Start ITGmania. *Find Content* is on the title menu, below Exit.
+Run the **Find Content installer** for your platform. It finds ITGmania, copies
+this module into Simply Love, and enables the one network setting the module
+needs — nothing to unzip, no config files to edit.
 
-### Enabling network access
+Then start ITGmania: *Find Content* is on the title menu, below Exit.
 
-ITGmania deliberately stops a theme from granting itself internet access, so
-this one step happens outside the Lua sandbox. Pick whichever you prefer:
+### Installing by hand instead
 
-**A. Hands-free launcher (recommended for cabinets).** Start the game through
-**`Launch ITGmania.bat`** (set it as your shortcut, or the cabinet boot
-command; Linux/macOS: `launch-itgmania.sh`). Then everything is in-game: open
-*Find Content*, press **allow**, then **restart now**. The launcher applies the
-setting and brings the game right back, ready to browse — no file editing and
-nothing to click outside the game, ever. It enables access only after you
-approve it in-game, and only for `stepmaniaonline.net`.
+1. Copy every file in this folder into `Themes/Simply Love/Modules/`.
+2. With ITGmania **closed**, run `Enable Network Access.bat`
+   (Linux/macOS: `bash enable-network-access.sh`) from that folder.
+3. Start ITGmania.
 
-**B. One-time script.** With ITGmania **closed**, double-click
-**`Enable Network Access.bat`** once (Linux/macOS: `bash enable-network-access.sh`),
-then start the game normally. Use this if you launch via Steam or another
-launcher you would rather not change.
-
-If access is not enabled yet, the in-game dialog detects which situation you
-are in: with the launcher it offers the one-press restart; without it, it
-points you at the script.
-
-### Why it cannot be fully automatic on its own
-
-`HttpEnabled` and `HttpAllowHosts` are declared `PreferenceType::Immutable`, so
-every Lua write is refused; `Preferences.ini`, `Static.ini` and `Defaults.ini`
-are each passed to `FILEMAN->ProtectPath()`, so the game refuses to write them
-even through its own file layer; and the Lua sandbox has no `os`/`io` library
-and no surviving way to launch a program or open a URL. A theme therefore
-cannot enable its own network access, edit those files, or run a program — by
-design, because themes are untrusted content. This module respects that
-boundary: the privileged edit is always done by something you started yourself
-(the launcher or the script), and only after you approve it in-game.
-
-Both helpers keep every host already in `HttpAllowHosts` (so GrooveStats keeps
-working), set `HttpEnabled=1`, write a timestamped `.bak` next to the file, and
-refuse to touch anything while the game is open — ITGmania rewrites
-`Preferences.ini` from memory on exit, so a mid-session edit would just be
-discarded. They are short, plain-text, and safe to open in any editor first.
-To do it entirely by hand instead, add this to the `HttpAllowHosts` line in
-`Save/Preferences.ini` with the game closed:
+Or edit it yourself: with the game closed, add this to the `HttpAllowHosts`
+line in `Save/Preferences.ini`:
 
     stepmaniaonline.net,*.stepmaniaonline.net
+
+### Why the network step exists
+
+ITGmania does not let a theme grant itself internet access. `HttpEnabled` and
+`HttpAllowHosts` are `PreferenceType::Immutable` so every Lua write is refused;
+`Preferences.ini`, `Static.ini` and `Defaults.ini` are all passed to
+`FILEMAN->ProtectPath()` so the game refuses to write them even through its own
+file layer; and the Lua sandbox has no `os`/`io` library and no way to launch a
+program. That boundary is deliberate — themes are untrusted content.
+
+So the setting is applied by the installer (or the helper script), which you
+run yourself, outside the game. This module never prompts for permission
+in-game and never tries to change the setting behind your back. If network
+access is missing it simply shows a **Network Access Not Enabled** warning
+naming the exact problem and how to fix it.
 
 Requires ITGmania **1.1 or newer** (tested on 1.3.0 / Simply Love 5.9.0).
 
@@ -123,9 +106,8 @@ In the browser, Up/Down moves between three rows: the **filter tabs**
 
 ## Uninstall
 
-Delete the module files from `Themes/Simply Love/Modules/` (and stop using
-`Launch ITGmania.bat` if you set it as your shortcut). Optionally also
-delete `Save/SMOFindContent/` (the banner cache) and remove the
-stepmaniaonline.net entries from `HttpAllowHosts` in `Save/Preferences.ini`
-with the game closed. The `.bak` files the setup script left in `Save/` can
-be deleted too.
+Run the installer with `-uninstall`, or delete the module files from
+`Themes/Simply Love/Modules/` by hand. Optionally also delete
+`Save/SMOFindContent/` (the banner cache) and remove the stepmaniaonline.net
+entries from `HttpAllowHosts` in `Save/Preferences.ini` with the game closed.
+Any `Preferences.ini.bak-*` files in `Save/` can be deleted too.
