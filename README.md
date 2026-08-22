@@ -152,6 +152,6 @@ menu.
 
 ## License
 
-MIT; see [LICENSE](LICENSE). The bundled artwork is licensed stock imagery and
+MIT, © Rosewood <rosewoodsteps@gmail.com>; see [LICENSE](LICENSE). The bundled artwork is licensed stock imagery and
 is not covered by the MIT grant — replace `internal/assets/banner.jpg` if you
 redistribute a fork.
