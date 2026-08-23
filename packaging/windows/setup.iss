@@ -241,7 +241,7 @@ begin
       if Pos('httpenabled=', Lower) = 1 then
         Enabled := (Trim(Copy(Line, Length('HttpEnabled=') + 1, Length(Line))) = '1');
       if Pos('httpallowhosts=', Lower) = 1 then
-        Allowed := (Pos('stepmaniaonline.net', Lower) > 0);
+        Allowed := (Pos('stepmaniaonline.net', Lower) > 0) and (Pos('127.0.0.1', Lower) > 0);
     end;
   end;
   Result := Enabled and Allowed;

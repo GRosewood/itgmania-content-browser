@@ -44,9 +44,38 @@ itgmania-content-browser-installer [flags]
   -detect               print the best-guess install directory (for front-ends)
   -y                    don't prompt; use the first detected install
   -uninstall            remove the module files
+  -helper               run the loopback service the in-game browser deletes packs with
   -no-banner            don't draw the artwork banner
   -version              print version and exit
 ```
+
+### How in-game pack deletion works
+
+The module's **Installed Packs** tab deletes packs outright, without the player
+leaving the game. It cannot do that on its own: ITGmania's Lua file manager
+exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`, `GetHashForFile`,
+`GetDirListing` and `Unzip`, and no delete, move or rename exists anywhere in
+the Lua API.
+
+What Lua *can* do is issue an HTTP request, and `NetworkManager::IsUrlAllowed`
+matches on host only — the port is not part of the check. So the installer adds
+`127.0.0.1` to `HttpAllowHosts` and registers a per-user login item that runs
+this same binary with `-helper`. That service:
+
+* binds **127.0.0.1 on an OS-assigned port** and nothing else;
+* generates a fresh token per run and publishes `{port, token}` to
+  `Save/ITGmaniaContentBrowser/helper.json` with mode 0600;
+* rejects any request that is not loopback and does not carry the token
+  (compared in constant time);
+* accepts only `GET /health` and `POST /remove`;
+* resolves the pack name through the same guard the tests cover — it must be a
+  plain folder name that lands directly inside a `Songs/` directory, so
+  `../Program` and friends are refused rather than acted on;
+* exits when its config file disappears or names another process, which is how
+  uninstall stops it and how an upgrade replaces it.
+
+No elevation, no system service, and `-uninstall` removes the login item, the
+binary and the config.
 
 ## What the installer does
 
@@ -56,8 +85,11 @@ itgmania-content-browser-installer [flags]
   you Browse.
 * **Copies the module** into `Themes/Simply Love/Modules/`, removing files from
   older versions so the module never loads twice.
-* **Enables network access** by adding `stepmaniaonline.net` to
-  `HttpAllowHosts` in `Preferences.ini` and setting `HttpEnabled=1`.
+* **Enables network access** by adding `stepmaniaonline.net`,
+  `arrowcloud.dance` (which curates the featured grid, supplies its artwork
+  and dates its releases) and `127.0.0.1` (the
+  local delete helper) to `HttpAllowHosts` in `Preferences.ini`, and setting
+  `HttpEnabled=1`.
 
 The preferences edit keeps every host already on your allowlist (GrooveStats
 keeps working), changes exactly one line, preserves CRLF endings, writes a
@@ -136,7 +168,9 @@ internal/
   assets/                        banner.jpg, embedded
   banner/                        terminal artwork rendering (+ tests)
   branding/                      product name, author, slug in one place
-  installer/                     discovery, Preferences.ini merge, copy (+ tests)
+  helper/                        loopback delete service (+ tests)
+  installer/                     discovery, Preferences.ini merge, copy,
+                                 pack removal, login item (+ tests)
 packaging/
   windows/setup.iss              Inno Setup wizard + generated wizard bitmaps
   macos/                         productbuild .pkg, background art, postinstall

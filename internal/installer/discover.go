@@ -15,13 +15,20 @@ type Install struct {
 	ThemesDir string // <root>/Themes
 	Portable  bool   // Save lives beside the install rather than in the user profile
 	Version   string // best-effort, may be empty
-	HasSimply bool   // Simply Love theme present
+	HasSimply bool   // at least one theme here can load the module
+
+	// ThemeDir is the theme chosen for this run. Empty means "work it out",
+	// which is what everything except an explicit choice wants.
+	ThemeDir string
 }
 
 // SimplyLoveDir returns the Simply Love theme directory for this install.
 // ITGmania ships the theme as "Simply Love"; some users rename their copy, so
 // we fall back to any theme directory that looks like Simply Love.
 func (i Install) SimplyLoveDir() string {
+	if i.ThemeDir != "" {
+		return i.ThemeDir
+	}
 	exact := filepath.Join(i.ThemesDir, "Simply Love")
 	if isDir(exact) {
 		return exact
@@ -193,7 +200,7 @@ func Inspect(root string) (Install, bool) {
 		}
 	}
 
-	inst.HasSimply = isDir(inst.SimplyLoveDir())
+	inst.HasSimply = len(CompatibleThemes(inst)) > 0
 	inst.Version = detectVersion(root)
 	return inst, true
 }

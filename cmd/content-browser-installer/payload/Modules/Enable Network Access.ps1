@@ -18,7 +18,8 @@ param([switch]$NoPause)
 
 $ErrorActionPreference = "Stop"
 
-$Hosts = @("stepmaniaonline.net", "*.stepmaniaonline.net")
+$Hosts = @("stepmaniaonline.net", "*.stepmaniaonline.net",
+           "arrowcloud.dance", "*.arrowcloud.dance")
 
 function Fail($msg) {
     Write-Host ""

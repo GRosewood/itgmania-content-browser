@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net"
+NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance"
 
 die() { printf '\n  %s\n\n' "$1" >&2; exit 1; }
 

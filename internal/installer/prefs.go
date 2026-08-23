@@ -11,7 +11,16 @@ import (
 )
 
 // Hosts added to ITGmania's allowlist so the module can reach the pack index.
-var Hosts = []string{"stepmaniaonline.net", "*.stepmaniaonline.net"}
+// 127.0.0.1 is the loopback helper: the game cannot delete files itself, so
+// the browser asks a local service to do it. HttpAllowHosts matches on host
+// only, so this is what makes http://127.0.0.1:<port> reachable from Lua.
+var Hosts = []string{
+	"stepmaniaonline.net", "*.stepmaniaonline.net",
+	// arrowcloud.dance curates the featured strip; its API and its banner
+	// assets are on separate subdomains
+	"arrowcloud.dance", "*.arrowcloud.dance",
+	"127.0.0.1",
+}
 
 // PrefsResult describes what EnsureAllowlist did.
 type PrefsResult struct {

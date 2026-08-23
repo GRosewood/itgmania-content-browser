@@ -18,6 +18,16 @@ type InstallResult struct {
 	Written    []string
 	Replaced   []string // superseded files removed during an upgrade
 	Prefs      PrefsResult
+	Helper     HelperResult
+}
+
+// HelperResult reports how the loopback delete helper was set up. A failure
+// here is not fatal: everything except in-game pack removal still works.
+type HelperResult struct {
+	Binary    string
+	Autostart string
+	Running   bool
+	Err       error
 }
 
 // legacyFiles are names shipped by earlier versions of this module. They must
@@ -76,17 +86,25 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 		if err != nil {
 			return err
 		}
-		name := filepath.Base(p)
-		dest := filepath.Join(res.ModulesDir, name)
+		// Keep the layout the payload has: the tab icons live in a
+		// subdirectory beside the module, and flattening them would put them
+		// where nothing looks for them.
+		rel := filepath.FromSlash(p)
+		dest := filepath.Join(res.ModulesDir, rel)
+		if dir := filepath.Dir(dest); dir != res.ModulesDir {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("creating %s: %w", dir, err)
+			}
+		}
 
 		mode := os.FileMode(0o644)
-		if strings.HasSuffix(name, ".sh") {
+		if strings.HasSuffix(p, ".sh") {
 			mode = 0o755
 		}
 		if err := os.WriteFile(dest, data, mode); err != nil {
 			return fmt.Errorf("writing %s: %w", dest, err)
 		}
-		res.Written = append(res.Written, name)
+		res.Written = append(res.Written, rel)
 		return nil
 	})
 	if err != nil {
@@ -98,7 +116,44 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 		return res, err
 	}
 	res.Prefs = prefs
+
+	// The loopback helper is what makes in-game pack deletion possible at all.
+	// It is best-effort: if any of this fails the browser still works, and the
+	// Installed Packs screen says removal is unavailable rather than lying.
+	res.Helper = setUpHelper(inst)
 	return res, nil
+}
+
+func setUpHelper(inst Install) HelperResult {
+	var out HelperResult
+
+	// An older helper may be running and holding its own binary open.
+	StopHelper(inst)
+
+	// Removal used to be a queue the player had to apply from the desktop.
+	// It is done in-game now, so the leftover queue file only confuses.
+	_ = os.Remove(filepath.Join(HelperDir(inst), "pending-removals.txt"))
+
+	bin, err := InstallHelperBinary(inst)
+	if err != nil {
+		out.Err = err
+		return out
+	}
+	out.Binary = bin
+
+	if err := RegisterAutostart(inst); err != nil {
+		out.Err = err
+		return out
+	}
+	out.Autostart = AutostartDescription(inst)
+
+	// Start it now so the feature works before the next login.
+	if err := StartHelper(inst); err != nil {
+		out.Err = err
+		return out
+	}
+	out.Running = true
+	return out
 }
 
 // Uninstall removes the module files. Preferences.ini is left alone: other
@@ -107,6 +162,19 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 	modulesDir := filepath.Join(inst.SimplyLoveDir(), "Modules")
 	removed := removeLegacy(modulesDir)
 
+	// Take the login item out first, then signal the running helper to exit by
+	// removing the config file it polls for.
+	where := AutostartDescription(inst)
+	if err := UnregisterAutostart(inst); err == nil {
+		removed = append(removed, "login item ("+where+")")
+	}
+	// StopHelper waits for the process to let go of its executable, so the
+	// delete below actually succeeds on Windows instead of silently failing.
+	StopHelper(inst)
+	if RemoveHelperBinary(inst) {
+		removed = append(removed, filepath.Base(HelperBinary(inst)))
+	}
+
 	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -114,15 +182,19 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		name := filepath.Base(p)
-		target := filepath.Join(modulesDir, name)
+		rel := filepath.FromSlash(p)
+		target := filepath.Join(modulesDir, rel)
 		if !isFile(target) {
 			return nil
 		}
 		if err := os.Remove(target); err != nil {
 			return fmt.Errorf("removing %s: %w", target, err)
 		}
-		removed = append(removed, name)
+		removed = append(removed, rel)
+		// tidy away a payload subdirectory once its last file has gone
+		if dir := filepath.Dir(target); dir != modulesDir {
+			_ = os.Remove(dir)
+		}
 		return nil
 	})
 	return removed, err

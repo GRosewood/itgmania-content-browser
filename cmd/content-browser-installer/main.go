@@ -35,9 +35,12 @@ func main() {
 		yesFlag       = flag.Bool("y", false, "do not prompt; use the first detected install")
 		uninstallFlag = flag.Bool("uninstall", false, "remove the module files")
 		listFlag      = flag.Bool("list", false, "list detected ITGmania installations and exit")
+		themeFlag     = flag.String("theme", "", "theme folder to install into (default: the one in use)")
+		listThemeFlag = flag.Bool("list-themes", false, "list this install's themes and whether the module can run under them")
 		versionFlag   = flag.Bool("version", false, "print version and exit")
 		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
+		helperFlag    = flag.Bool("helper", false, "run the loopback service the in-game browser uses to delete packs")
 	)
 	flag.Parse()
 
@@ -58,7 +61,14 @@ func main() {
 		os.Exit(0)
 	}
 
-	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag)
+	// -helper is a long-running service, not an install run; it never draws
+	// chrome and never prompts.
+	if *helperFlag {
+		os.Exit(runHelper(*targetFlag))
+	}
+
+	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag,
+		*themeFlag, *listThemeFlag)
 	// Double-clicked on Windows: keep the console up so the result is readable.
 	if runtime.GOOS == "windows" && !*yesFlag && isDoubleClicked() {
 		fmt.Print("\nPress Enter to close...")
@@ -67,7 +77,8 @@ func main() {
 	os.Exit(code)
 }
 
-func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
+func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
+	wantTheme string, listThemes bool) int {
 	fmt.Println()
 	if !noBanner && !listOnly {
 		if banner.Render(os.Stdout, assets.FS, assets.BannerPath, banner.TerminalWidth()-2) {
@@ -121,6 +132,17 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
 		return 0
 	}
 
+	if listThemes {
+		for _, in := range installs {
+			fmt.Printf("  %s\n", in.Root)
+			for _, t := range installer.Themes(in) {
+				fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
+			}
+			fmt.Println()
+		}
+		return 0
+	}
+
 	inst := installs[0]
 	if len(installs) > 1 && !assumeYes {
 		fmt.Println("  More than one ITGmania installation was found:")
@@ -132,18 +154,50 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
 		inst = installs[choose(len(installs))]
 	}
 
+	themes := installer.Themes(inst)
+	theme, ask, err := installer.PickTheme(themes, wantTheme)
+	if err != nil {
+		fmt.Printf("  Install:  %s\n\n", inst.Root)
+		listThemeTable(themes)
+		return fail("%v\n"+
+			"  This module is a Simply Love add-on. Any Simply Love fork works,\n"+
+			"  so long as it loads Modules/ and has a title menu to add to.", err)
+	}
+	if ask && !assumeYes {
+		// More than one theme here could take it and none of them is the one in
+		// use, so there is no answer that is not a preference.
+		fmt.Println("  More than one theme here can run the module:")
+		fmt.Println()
+		var usable []installer.Theme
+		for _, t := range themes {
+			if t.Compatible() {
+				usable = append(usable, t)
+			}
+		}
+		for i, t := range usable {
+			fmt.Printf("    [%d] %-36s %s\n", i+1, t.Name, describeTheme(t))
+		}
+		fmt.Println()
+		theme = usable[choose(len(usable))]
+	}
+	inst.ThemeDir = theme.Path
+
 	fmt.Printf("  Install:  %s\n", inst.Root)
 	if inst.Version != "" {
 		fmt.Printf("  Version:  ITGmania %s\n", inst.Version)
 	}
-	fmt.Printf("  Theme:    %s\n", inst.SimplyLoveDir())
+	fmt.Printf("  Theme:    %s\n", theme.Name)
+	if !theme.Current {
+		// Installing into a theme that is not switched on is legitimate -- people
+		// set one up before moving to it -- but silently doing nothing visible is
+		// not, so say it.
+		if cur := installer.CurrentTheme(inst.SaveDir); cur != "" {
+			fmt.Printf("            (this install currently uses %q; switch to %q to see it)\n",
+				cur, theme.Name)
+		}
+	}
 	fmt.Printf("  Save:     %s\n", inst.SaveDir)
 	fmt.Println()
-
-	if !inst.HasSimply {
-		return fail("the Simply Love theme was not found in %s\n"+
-			"  This module is a Simply Love add-on; install that theme first.", inst.ThemesDir)
-	}
 
 	// ITGmania rewrites Preferences.ini from memory on exit, so a running
 	// game would discard the allowlist change.
@@ -202,6 +256,16 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
 		fmt.Println("  Network access: already enabled")
 	}
 
+	switch {
+	case res.Helper.Err != nil:
+		fmt.Printf("  Pack removal:   unavailable (%v)\n", res.Helper.Err)
+		fmt.Println("    The browser still works; only in-game pack deletion is off.")
+	case res.Helper.Running:
+		fmt.Println("  Pack removal:   enabled (local helper running, starts with your session)")
+	default:
+		fmt.Println("  Pack removal:   set up, but the helper is not running yet")
+	}
+
 	if !installer.AllowlistSatisfied(inst.SaveDir) {
 		fmt.Println()
 		fmt.Println("  WARNING: the allowlist still does not look right.")
@@ -210,7 +274,7 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool) int {
 	}
 
 	fmt.Println()
-	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, below Exit.\n", branding.MenuLabel)
+	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, above Exit.\n", branding.MenuLabel)
 	return 0
 }
 
@@ -232,6 +296,34 @@ func describe(inst installer.Install) string {
 }
 
 // choose asks which install to use and returns a 0-based index.
+// describeTheme is the one-line verdict beside a theme in a listing.
+func describeTheme(t installer.Theme) string {
+	var bits []string
+	if t.Current {
+		bits = append(bits, "in use")
+	}
+	if t.Installed {
+		bits = append(bits, "module installed")
+	}
+	if !t.Compatible() {
+		bits = append(bits, t.Why())
+	} else if len(bits) == 0 {
+		bits = append(bits, "compatible")
+	}
+	return strings.Join(bits, ", ")
+}
+
+func listThemeTable(themes []installer.Theme) {
+	if len(themes) == 0 {
+		return
+	}
+	fmt.Println("  Themes found:")
+	for _, t := range themes {
+		fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
+	}
+	fmt.Println()
+}
+
 func choose(n int) int {
 	reader := bufio.NewReader(os.Stdin)
 	for {
