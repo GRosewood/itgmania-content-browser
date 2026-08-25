@@ -97,7 +97,8 @@ printf '  Preferences file:\n    %s\n\n' "$PREFS"
 [ -w "$PREFS" ] || die "$PREFS is not writable."
 
 TMP="$PREFS.tmp.$$"
-trap 'rm -f "$TMP"' EXIT
+TMP2="$PREFS.tmp2.$$"
+trap 'rm -f "$TMP" "$TMP2"' EXIT
 
 # awk does the merge: preserve every existing host and every other line,
 # force HttpEnabled=1, and insert either key under [Options] if it is absent.
@@ -107,7 +108,12 @@ function merge(current,   n, i, j, seen, out, parts, host, extra, m, k) {
     out = ""
     for (i = 1; i <= n; i++) {
         host = parts[i]
-        gsub(/^[ \t]+|[ \t]+$/, "", host)
+        # \r matters: on a CRLF Preferences.ini read here, the LAST host in the
+        # existing list keeps its carriage return, and appending ours after it
+        # buries that CR in the middle of the value. The engine splits on ","
+        # and compares exactly, so a host belonging to the player silently stops
+        # matching anything -- destroyed by a script that only meant to add to it.
+        gsub(/^[ \t\r]+|[ \t\r]+$/, "", host)
         if (host == "") continue
         k = tolower(host)
         if (k in seen) continue
@@ -133,13 +139,17 @@ BEGIN { changed = 0; sawhosts = 0; sawenabled = 0; inserted = 0 }
     gsub(/^[ \t]+/, "", trimmed)
     lower = tolower(trimmed)
 
-    if (index(lower, "httpallowhosts=") == 1) {
+    # Matched with optional space before the "=", the way the engine, the
+    # PowerShell script and the Go installer all read it. An exact "key="
+    # prefix missed a hand-edited "HttpAllowHosts = foo", which then looked
+    # absent and got a SECOND copy appended by the insert pass below.
+    if (lower ~ /^httpallowhosts[ \t]*=/) {
         sawhosts = 1
         eq = index(line, "=")
         print "HttpAllowHosts=" merge(substr(line, eq + 1))
         next
     }
-    if (index(lower, "httpenabled=") == 1) {
+    if (lower ~ /^httpenabled[ \t]*=/) {
         sawenabled = 1
         eq = index(line, "=")
         val = substr(line, eq + 1)
@@ -149,35 +159,44 @@ BEGIN { changed = 0; sawhosts = 0; sawenabled = 0; inserted = 0 }
         next
     }
     print line
-    # Remember where [Options] was so missing keys can be added after it.
-    if (lower ~ /^\[options\][ \t\r]*$/ && !inserted) {
-        optline = NR
-        inserted = 1
-    }
 }
 END {
-    if (!sawhosts || !sawenabled) exit 9   # signal: needs the insert pass
+    # Which keys were missing, encoded so the insert pass adds only those.
+    # Adding both regardless was the bug this replaces: whichever key DID
+    # exist got a second copy, and the engine takes the LAST one it reads
+    # (IniFile::SetKeyValue -> XNode::AppendAttr, which overwrites). So an
+    # existing "HttpEnabled=0" further down beat the inserted "HttpEnabled=1"
+    # and HTTP stayed off, or an existing HttpAllowHosts beat ours and the
+    # edit was discarded -- in both cases under a "Done." message, because the
+    # read-back at the end matched the inserted line rather than the winning one.
+    if (!sawhosts || !sawenabled)
+        exit (8 + (sawhosts ? 0 : 1) + (sawenabled ? 0 : 2))
     exit (changed ? 0 : 1)                 # 0 = changed, 1 = already fine
 }
 ' "$PREFS" > "$TMP"
 STATUS=$?
 
-if [ "$STATUS" -eq 9 ]; then
-    # One or both keys were missing entirely: add them under [Options].
-    awk -v newhosts="$NEW_HOSTS" '
+if [ "$STATUS" -ge 9 ] && [ "$STATUS" -le 11 ]; then
+    # A key was missing entirely: add just that one, under [Options].
+    NEED_HOSTS=$(( (STATUS - 8) % 2 ))
+    NEED_ENABLED=$(( (STATUS - 8) / 2 ))
+    # Reads $TMP, not $PREFS: the first pass already merged whichever key was
+    # present, and re-reading the original would throw that work away.
+    awk -v newhosts="$NEW_HOSTS" -v need_hosts="$NEED_HOSTS" -v need_enabled="$NEED_ENABLED" '
     BEGIN { done = 0 }
     {
         print $0
         line = tolower($0)
         gsub(/^[ \t]+|[ \t\r]+$/, "", line)
         if (!done && line == "[options]") {
-            print "HttpEnabled=1"
-            print "HttpAllowHosts=" newhosts
+            if (need_enabled) print "HttpEnabled=1"
+            if (need_hosts) print "HttpAllowHosts=" newhosts
             done = 1
         }
     }
     END { if (!done) exit 1 }
-    ' "$PREFS" > "$TMP" || die "Preferences.ini has no [Options] section - it may be corrupt."
+    ' "$TMP" > "$TMP2" || die "Preferences.ini has no [Options] section - it may be corrupt."
+    mv "$TMP2" "$TMP"
     STATUS=0
 fi
 
@@ -191,9 +210,16 @@ BACKUP="$PREFS.bak-$(date +%Y%m%d-%H%M%S)"
 cp "$PREFS" "$BACKUP" || die "Could not write a backup next to Preferences.ini."
 cat "$TMP" > "$PREFS" || die "Could not write $PREFS."
 
-# Never claim success without reading the file back.
-if grep -qi '^[[:space:]]*HttpAllowHosts=.*127\.0\.0\.1' "$PREFS" &&
-   grep -qi '^[[:space:]]*HttpEnabled=1' "$PREFS"; then
+# Never claim success without reading the file back -- and read it the way the
+# ENGINE does. Asking "is there a line that looks right" is what let the
+# duplicate-key bug report success: the inserted line matched while a later one
+# quietly overrode it. The engine keeps the LAST occurrence of each key, so the
+# last occurrence is what gets checked here.
+last_hosts="$(grep -i '^[[:space:]]*HttpAllowHosts[[:space:]]*=' "$PREFS" | tail -1 | tr -d '\r')"
+last_enabled="$(grep -i '^[[:space:]]*HttpEnabled[[:space:]]*=' "$PREFS" | tail -1 | tr -d '\r')"
+
+if printf '%s' "$last_hosts" | grep -q '127\.0\.0\.1' &&
+   printf '%s' "$last_enabled" | grep -q '=[[:space:]]*1[[:space:]]*$'; then
     printf '  Done.\n'
     printf '    127.0.0.1 added to HttpAllowHosts\n'
     printf '    HttpEnabled=1\n'

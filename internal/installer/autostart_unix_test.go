@@ -3,6 +3,8 @@
 package installer
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -137,6 +139,50 @@ func TestAutostartHomeFollowsTheSaveDirNotTheGuess(t *testing.T) {
 		if !strings.HasPrefix(path, player+"/") {
 			t.Errorf("%q is not under the player's home", path)
 		}
+	}
+}
+
+// XDG_CONFIG_HOME describes the CURRENT session. When the game belongs to a
+// different account, honouring it writes the registration into the installing
+// user's profile, where the player's session never looks.
+//
+// This is not hypothetical: it is how this first broke. The test above passed
+// on a machine with XDG_CONFIG_HOME unset and failed on CI, which sets it --
+// autostartHome was right and the directory built from it was not.
+func TestXDGConfigHomeIsIgnoredForAnotherAccount(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/home/someone-else/.config")
+
+	player := "/home/player"
+	inst := Install{Root: "/opt/itgmania", SaveDir: saveUnderHome(player)}
+	if inst.SaveDir == "" {
+		t.Skip("no per-home save path on this platform")
+	}
+	for _, path := range []string{
+		systemdUnitPath(inst), systemdWantsPath(inst), autostartDesktopPath(inst),
+	} {
+		if !strings.HasPrefix(path, player+"/") {
+			t.Errorf("%q followed XDG_CONFIG_HOME instead of the game's account", path)
+		}
+	}
+}
+
+// ...but for the account actually at the keyboard, the variable is the right
+// answer and must still be honoured -- a session that relocates its config
+// directory is entitled to expect things to land there.
+func TestXDGConfigHomeIsHonouredForTheCurrentUser(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory in this environment")
+	}
+	custom := filepath.Join(home, "custom-config")
+	t.Setenv("XDG_CONFIG_HOME", custom)
+
+	inst := Install{Root: "/opt/itgmania", SaveDir: saveUnderHome(home)}
+	if inst.SaveDir == "" {
+		t.Skip("no per-home save path on this platform")
+	}
+	if got := systemdUnitPath(inst); !strings.HasPrefix(got, custom+string(filepath.Separator)) {
+		t.Errorf("systemdUnitPath = %q, want it under %q", got, custom)
 	}
 }
 

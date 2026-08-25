@@ -100,13 +100,26 @@ func launchAgentPath(inst Install) string {
 		launchAgentLabel(inst)+".plist")
 }
 
+// xdgConfigHome is the config directory of the account the GAME runs as.
+//
+// XDG_CONFIG_HOME describes the CURRENT session, and this function is often
+// asked about somebody else: a sudo install, or a machine where the game
+// belongs to a different account than the one at the keyboard. Trusting the
+// variable in that case writes the registration into the installing user's
+// profile, where the player's session will never look for it -- the same
+// mistake autostartHome used to make, one directory further down.
+//
+// So the variable is honoured only when the home it would describe is the home
+// we actually resolved. Everything else is derived from that home. Testing
+// isRoot() alone was not enough: root is not the only way to be somebody else.
 func xdgConfigHome(inst Install) string {
-	// Only trust the environment when it belongs to the account we are
-	// installing for; under sudo it points at root's config.
+	home := autostartHome(inst)
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" && !isRoot() {
-		return dir
+		if self, err := os.UserHomeDir(); err == nil && self == home {
+			return dir
+		}
 	}
-	return filepath.Join(autostartHome(inst), ".config")
+	return filepath.Join(home, ".config")
 }
 
 func autostartDesktopPath(inst Install) string {
