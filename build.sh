@@ -87,7 +87,15 @@ fi
 
 ISCC="${ISCC:-}"
 if [ -z "$ISCC" ]; then
-  for c in "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/c/Program Files/Inno Setup 6/ISCC.exe"; do
+  # Program Files is where a machine-wide install lands, and where CI's
+  # chocolatey package puts it. AppData\Local\Programs is where winget puts it
+  # without --scope machine -- which is the route that needs no UAC prompt, so
+  # it is the one a developer is most likely to have taken. Looking only in
+  # Program Files silently skipped the wizard for them.
+  for c in \
+    "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+    "/c/Program Files/Inno Setup 6/ISCC.exe" \
+    "${LOCALAPPDATA:-$HOME/AppData/Local}/Programs/Inno Setup 6/ISCC.exe"; do
     [ -x "$c" ] && ISCC="$c" && break
   done
 fi

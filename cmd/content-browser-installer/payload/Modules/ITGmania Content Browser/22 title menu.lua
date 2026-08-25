@@ -38,6 +38,15 @@ local titleLastIndex = 0
 local titleWatchIndex = -1
 local titleWatchFocused = nil
 local titleNumChoices = 4
+
+-- Where the engine's selection is about to land, while it has yet to move.
+--
+-- Input reaches this module before the engine, so TitleGetEngineIndex() stays
+-- at its pre-move value for the rest of the pass -- and a repaint made from it
+-- lights the row being left. Whenever an event is handed on for the engine to
+-- act on, the landing index is recorded here and the rows paint from it, so
+-- the very frame of the keypress is already correct. The watcher clears it.
+local titlePendingIndex = nil
 local TITLE = {
 	MENU_SHIFT  = 10,   -- pixels to raise the native menu block
 	SPACING     = 22,   -- row pitch, matching the theme's own metric
@@ -107,6 +116,24 @@ local function TitleGetEngineIndex()
 	local ok, index = pcall(screen.GetSelectionIndex, screen, PLAYER_1)
 	if ok and type(index) == "number" then return index end
 	return 0
+end
+
+-- The selection the rows should paint from.
+--
+-- The prediction while one stands, otherwise whatever the engine really says.
+local function TitlePaintIndex()
+	return titlePendingIndex or TitleGetEngineIndex()
+end
+
+-- Record where the engine is about to move to, for the repaint that happens
+-- before it gets the chance. Only ever called on a path that hands the event
+-- on; a consumed event leaves the index alone and needs no guess.
+local function TitlePredict(index)
+	titlePendingIndex = index
+	-- Tell the watcher what to expect, so a correct guess costs no second
+	-- broadcast -- and a wrong one still trips its comparison and repaints.
+	titleWatchIndex = index
+	titleWatchFocused = titleFocused
 end
 
 -- play GainFocus/LoseFocus on one of the engine's scroller choices (0-based
@@ -221,6 +248,15 @@ local TitleOverlayInput = function(event)
 			-- and go inert until the screen changes
 			titleLeaving = true
 			if refs.titleItem then refs.titleItem:playcommand("SMOTitleLeave") end
+		elseif isMenuNav then
+			-- A move between two native choices. Nothing here broadcast at
+			-- all, so the highlight used to trail the selection until the next
+			-- watcher tick. The engine wraps (WrapCursor is true for this
+			-- screen), and our row is not in its cycle, so the landing index is
+			-- simply one step round.
+			local step = isForward and 1 or -1
+			TitlePredict((engineIndex + step + titleNumChoices) % titleNumChoices)
+			MESSAGEMAN:Broadcast("SMOTitleRefresh")
 		end
 		return false
 	end
@@ -241,7 +277,9 @@ local TitleOverlayInput = function(event)
 	elseif isForward then
 		if engineIndex == above then
 			if isMenuNav then
-				-- let the engine step down onto the choice below ours
+				-- let the engine step down onto the choice below ours, and
+				-- paint that row now rather than the one being left
+				TitlePredict(below)
 				TitleDefocus(false)
 				return false
 			end
@@ -256,7 +294,9 @@ local TitleOverlayInput = function(event)
 	elseif isBackward then
 		if engineIndex == below then
 			if isMenuNav then
-				-- let the engine step up onto the choice above ours
+				-- let the engine step up onto the choice above ours, and paint
+				-- that row now rather than the one being left
+				TitlePredict(above)
 				TitleDefocus(false)
 				return false
 			end
@@ -422,6 +462,11 @@ local function TitleActor()
 			local screen = SCREENMAN:GetTopScreen()
 			if not screen or screen:GetName() ~= "ScreenTitleMenu" then return end
 			local index = TitleGetEngineIndex()
+			-- Any prediction has done its job by now: the engine handles the
+			-- event in the same pass the guess was made in, so by this poll it
+			-- has moved. Reality takes over, and the comparison below repaints
+			-- if the guess turned out wrong.
+			titlePendingIndex = nil
 			if index ~= titleWatchIndex or titleFocused ~= titleWatchFocused then
 				titleWatchIndex = index
 				titleWatchFocused = titleFocused
@@ -464,7 +509,7 @@ local function TitleActor()
 				if engineIndex == nil then
 					focused = titleFocused
 				else
-					focused = (not titleFocused) and TitleGetEngineIndex() == engineIndex
+					focused = (not titleFocused) and TitlePaintIndex() == engineIndex
 				end
 
 				if focused then
