@@ -20,13 +20,14 @@ setting the module needs.
 |---|---|---|
 | **Windows** | `itgmania-content-browser-setup-<version>.exe` | Graphical setup wizard |
 | **macOS** | `itgmania-content-browser-setup-<version>.pkg` | Installer.app package |
-| **Linux** | `itgmania-content-browser-installer-linux-amd64` (or `-arm64`) | Console installer |
+| **Linux** | `itgmania-content-browser-installer-<version>-linux-amd64.tar.gz` (or `-arm64`) | Console installer |
 
 **Close ITGmania first.** ITGmania rewrites `Preferences.ini` from memory when
 it exits, so the installers refuse to run while it is open.
 
-On macOS and Linux you may need `chmod +x` first, and macOS marks downloads as
-quarantined — right-click → Open, or
+The Linux and macOS downloads are `.tar.gz` so the executable bit survives:
+`tar -xzf <file>` gives you something that runs, with no `chmod` needed. macOS
+still marks downloads as quarantined — right-click → Open, or
 `xattr -d com.apple.quarantine <file>`.
 
 Then start ITGmania: **Find Content** is on the title menu, above Exit.

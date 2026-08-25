@@ -349,6 +349,17 @@ func autostartInfo(inst Install) AutostartStatus {
 			"session, desktop or not -- so a cabinet that logs in automatically and "+
 			"runs the game from a script is fine. For a cabinet with no login at all, "+
 			"run: sudo loginctl enable-linger "+baseName(autostartHome(inst))
+		// Do not hand somebody a command that cannot work. On a read-only
+		// image /var/lib/systemd cannot be written, so enable-linger fails with
+		// "read-only file system" and no hint about what to do instead.
+		if readOnlyFS(lingerDir) {
+			note = "A systemd user service starts for any login session, desktop " +
+				"or not -- but NOT for a machine that boots straight into the game " +
+				"without logging anybody in. Lingering would fix that, and cannot " +
+				"be enabled here: " + lingerDir + " is on a read-only filesystem. " +
+				"Start the helper from whatever launches ITGmania instead, by " +
+				"adding this line before the game: " + HelperCommand(inst)
+		}
 		if lingering(autostartHome(inst)) {
 			starts = StartsAtBoot
 			note = "Lingering is enabled for this account, so the service starts at " +
@@ -383,6 +394,9 @@ func autostartInfo(inst Install) AutostartStatus {
 	return AutostartStatus{Mechanism: MechNone, Starts: StartsOnDesktopSession}
 }
 
+// lingerDir is where logind records which accounts linger.
+const lingerDir = "/var/lib/systemd/linger"
+
 // lingering reports whether logind will start this user's systemd instance at
 // boot. The marker file is logind's own record of it.
 func lingering(home string) bool {
@@ -390,7 +404,7 @@ func lingering(home string) bool {
 	if user == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join("/var/lib/systemd/linger", user))
+	_, err := os.Stat(filepath.Join(lingerDir, user))
 	return err == nil
 }
 

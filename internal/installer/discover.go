@@ -47,7 +47,9 @@ func (i Install) ModuleThemeDir() string {
 		return themeDir != "" &&
 			isFile(filepath.Join(themeDir, "Modules", "ITGmania Content Browser.lua"))
 	}
-	if current := preference(i.SaveDir, "Theme"); current != "" {
+	// CurrentTheme, not preference(): a per-game override beats the global
+	// Theme key, and the override is what the running game actually loads.
+	if current := CurrentTheme(i.SaveDir); current != "" {
 		dir := filepath.Join(i.ThemesDir, current)
 		if has(dir) {
 			return dir
@@ -70,6 +72,17 @@ func (i Install) ModuleThemeDir() string {
 func (i Install) SimplyLoveDir() string {
 	if i.ThemeDir != "" {
 		return i.ThemeDir
+	}
+	// The theme actually in use comes before any match on name.
+	//
+	// An install can hold both "Simply Love" and "Simply Love-SM5", with the
+	// second one switched on. Taking the stock name first put the module into
+	// the theme the player does not load, and nothing said so -- the files
+	// landed, the installer reported success, and Find Content never appeared.
+	if cur := CurrentTheme(i.SaveDir); cur != "" {
+		if dir := filepath.Join(i.ThemesDir, cur); isDir(dir) {
+			return dir
+		}
 	}
 	exact := filepath.Join(i.ThemesDir, "Simply Love")
 	if isDir(exact) {

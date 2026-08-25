@@ -278,3 +278,51 @@ func AllowlistSatisfied(saveDir string) bool {
 	}
 	return enabled && allowed
 }
+
+// AllowlistState is AllowlistSatisfied with the reason it is not.
+//
+// Three different failures used to arrive as one "the allowlist does not look
+// right": the file not being there at all, HttpEnabled being off, and the
+// loopback entry being absent. They need different answers -- the first is
+// usually the wrong save directory or a game that has never been run, and
+// telling someone to re-run the installer for that is a dead end -- so the
+// caller gets to say which one happened.
+func AllowlistState(saveDir string) (ok bool, reason string) {
+	path := filepath.Join(saveDir, "Preferences.ini")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, "there is no Preferences.ini at " + path +
+				" -- run ITGmania once so it writes one, then install again"
+		}
+		return false, "cannot read " + path + ": " + err.Error()
+	}
+	enabled, allowed := false, false
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		key, value, fine := splitKV(sc.Text())
+		if !fine {
+			continue
+		}
+		switch strings.ToLower(key) {
+		case "httpenabled":
+			enabled = value == "1"
+		case "httpallowhosts":
+			for _, h := range strings.Split(value, ",") {
+				if strings.EqualFold(strings.TrimSpace(h), Hosts[0]) {
+					allowed = true
+				}
+			}
+		}
+	}
+	switch {
+	case !enabled && !allowed:
+		return false, "HttpEnabled is not 1 and " + Hosts[0] + " is not in HttpAllowHosts"
+	case !enabled:
+		return false, "HttpEnabled is not 1 (the hosts are fine)"
+	case !allowed:
+		return false, Hosts[0] + " is not in HttpAllowHosts (HttpEnabled is fine)"
+	}
+	return true, ""
+}

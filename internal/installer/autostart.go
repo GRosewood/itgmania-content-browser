@@ -286,3 +286,43 @@ func UnregisterAutostart(inst Install) error { return unregisterAutostart(inst) 
 
 // AutostartDescription names where this install's registration lives.
 func AutostartDescription(inst Install) string { return autostartDescription(inst) }
+
+// HelperConfigPath is where the helper publishes its port and token. Its
+// presence and age separate "never started" from "started once and stopped",
+// which need different answers.
+func HelperConfigPath(inst Install) string {
+	return filepath.Join(HelperDir(inst), "helper.json")
+}
+
+// HelperCommand is the line to add to whatever launches ITGmania, for a
+// machine where nothing else will start the helper.
+//
+// This is the last resort and it is a real one: a cabinet that boots straight
+// into the game logs nobody in, so no per-user service manager ever runs, and
+// on a read-only image lingering cannot be turned on either. Starting the
+// helper beside the game is then the only thing left -- and the install
+// directory has to be spelled out, because without it the helper falls back to
+// discovery and can pick a different install than the one being launched.
+func HelperCommand(inst Install) string {
+	return quoteArg(HelperBinary(inst)) + " -helper -install-dir " +
+		quoteArg(inst.Root) + " &"
+}
+
+// quoteArg wraps a path in double quotes when it needs them, so the printed
+// line can be pasted into a shell script unchanged.
+func quoteArg(s string) string {
+	// The characters a POSIX shell would treat as anything other than text.
+	const special = " \t\"'\\$`"
+	if s != "" && !strings.ContainsAny(s, special) {
+		return s
+	}
+	// Inside double quotes a shell still expands $ and backticks and honours
+	// a backslash, so those four are the ones that have to be escaped.
+	esc := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		"`", "\\`",
+	)
+	return `"` + esc.Replace(s) + `"`
+}

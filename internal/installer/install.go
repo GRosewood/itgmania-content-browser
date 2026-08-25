@@ -28,6 +28,15 @@ type HelperResult struct {
 	Autostart string
 	Running   bool
 	Err       error
+
+	// Launcher is the file that starts ITGmania at boot, when one was found
+	// and the helper start was added to it. LauncherChanged is false when the
+	// block was already there and unchanged, which is the normal case on a
+	// re-run. A failure here is reported but never fatal: the registration
+	// above still stands, and on any machine that logs in it is enough.
+	Launcher        string
+	LauncherChanged bool
+	LauncherErr     error
 }
 
 // legacyFiles are names shipped by earlier versions of this module. They must
@@ -201,6 +210,17 @@ func setUpHelper(inst Install) HelperResult {
 	}
 	out.Autostart = AutostartDescription(inst)
 
+	// A machine that boots straight into the game logs nobody in, so the
+	// registration above never fires there. Whatever launches the game does,
+	// so the helper is started from that too. Belt and braces is safe: a
+	// second helper publishes over the first, and the first notices its token
+	// changed within two seconds and exits, so the pair converges to one.
+	if path, changed, err := PatchLauncher(inst); err != nil {
+		out.LauncherErr = err
+	} else if path != "" {
+		out.Launcher, out.LauncherChanged = path, changed
+	}
+
 	// Start it now so the feature works before the next login.
 	if err := StartHelper(inst); err != nil {
 		out.Err = err
@@ -230,6 +250,9 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 	was := autostartInfo(inst)
 	if err := UnregisterAutostart(inst); err == nil && was.Mechanism != MechNone {
 		removed = append(removed, string(was.Mechanism)+" ("+was.Path+")")
+	}
+	if path, taken := UnpatchLauncher(inst); taken {
+		removed = append(removed, "helper start removed from "+path)
 	}
 	// StopHelper waits for the process to let go of its executable, so the
 	// delete below actually succeeds on Windows instead of silently failing.

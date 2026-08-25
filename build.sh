@@ -114,6 +114,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Put the version in the artifact names, and wrap the unix ones in a tarball.
+#
+# Done here rather than at build time on purpose: setup.iss and build-pkg.sh
+# both reference the binaries by their build-time names, and versioning those
+# would mean threading ${VERSION} through two more files to no benefit. What
+# matters is what lands in dist/, because that is what people download -- and
+# a bare "installer-linux-amd64" on a release page tells nobody which release
+# it came from.
+#
+# The tarball is what carries the executable bit. A bare binary attached to a
+# release arrives without +x, so every Linux and macOS user has to chmod it
+# before it runs -- a step people reasonably skip and then report as a broken
+# installer.
+UNIVERSAL="darwin universal itgmania-content-browser-installer-macos-universal"
+echo
+echo "  version-stamped artifacts:"
+for entry in "${targets[@]}" "$UNIVERSAL"; do
+  read -r goos goarch name <<<"$entry"
+  [ -f "$OUT/$name" ] || continue
+  versioned="${name/itgmania-content-browser-installer-/itgmania-content-browser-installer-${VERSION}-}"
+  mv "$OUT/$name" "$OUT/$versioned"
+  echo "    $versioned"
+  case "$goos" in
+    linux|darwin)
+      go run ./tools/mktarball -in "$OUT/$versioned" -out "$OUT/$versioned.tar.gz" >/dev/null
+      echo "    $versioned.tar.gz  (mode 0755)"
+      ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
 # The in-game update payload.
 #
 # The browser updates itself by fetching this archive and unpacking it over

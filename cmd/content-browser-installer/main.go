@@ -59,6 +59,7 @@ func main() {
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
 		helperFlag    = flag.Bool("helper", false, "run the local service the in-game browser needs")
 		manifestFlag  = flag.String("manifest", "", "where the helper looks for update news (default: the published one)")
+		verboseFlag   = flag.Bool("verbose", false, "list every file installed or removed")
 		checkFlag     = flag.Bool("check", false, "report whether the browser will actually work on this machine, and exit")
 	)
 	flag.Parse()
@@ -98,7 +99,7 @@ func main() {
 	}
 
 	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag,
-		*themeFlag, *listThemeFlag)
+		*themeFlag, *listThemeFlag, *verboseFlag)
 	// Double-clicked on Windows: keep the console up so the result is readable.
 	if runtime.GOOS == "windows" && !*yesFlag && isDoubleClicked() {
 		fmt.Print("\nPress Enter to close...")
@@ -108,7 +109,7 @@ func main() {
 }
 
 func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
-	wantTheme string, listThemes bool) int {
+	wantTheme string, listThemes, verbose bool) int {
 	fmt.Println()
 	if !noBanner && !listOnly {
 		if banner.Render(os.Stdout, assets.FS, assets.BannerPath, banner.TerminalWidth()-2) {
@@ -274,9 +275,19 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 			fmt.Println("  Nothing to remove - the module was not installed here.")
 			return 0
 		}
-		fmt.Println("  Removed:")
+		// Edits outside the module's own directory are always named, however
+		// quiet the rest of the output is: putting a line into somebody's boot
+		// script is not a detail, and neither is taking it out again.
 		for _, name := range removed {
-			fmt.Printf("    %s\n", name)
+			if strings.HasPrefix(name, "helper start removed from") {
+				fmt.Printf("  %s\n", name)
+			}
+		}
+		fmt.Printf("  Removed:        %d item(s)\n", len(removed))
+		if verbose {
+			for _, name := range removed {
+				fmt.Printf("       %s\n", name)
+			}
 		}
 		fmt.Println()
 		fmt.Println("  Whatever HttpAllowHosts entries the install added were left in")
@@ -291,18 +302,26 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	}
 
 	if len(res.Replaced) > 0 {
-		fmt.Println("  Replaced older files:")
-		for _, name := range res.Replaced {
-			fmt.Printf("    %s\n", name)
+		fmt.Printf("  Replaced:       %d file(s) from an older version\n", len(res.Replaced))
+		if verbose {
+			for _, name := range res.Replaced {
+				fmt.Printf("       %s\n", name)
+			}
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("  Installed:")
-	for _, name := range res.Written {
-		fmt.Printf("    %s\n", name)
-	}
+	// A count, not a roll call. The payload is 69 files, and listing every
+	// one buried the things actually worth reading -- which theme it went
+	// into, whether the helper came up -- under screens of scrollback.
+	// -verbose brings the names back when something needs chasing.
+	fmt.Printf("  Installed:      %d files\n", len(res.Written))
 	fmt.Printf("    -> %s\n", res.ModulesDir)
+	if verbose {
+		for _, name := range res.Written {
+			fmt.Printf("       %s\n", name)
+		}
+	}
 	fmt.Println()
 
 	switch {
@@ -333,10 +352,28 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	}
 	printAutostart(installer.AutostartInfo(inst))
 
-	if !installer.AllowlistSatisfied(inst.SaveDir) {
+	// A cabinet that boots into the game never logs in, so the registration
+	// above never fires there. Say when the game's own launcher was used
+	// instead -- it is the thing that makes it work on those machines, and it
+	// is somebody's boot path, so it should not happen silently.
+	switch {
+	case res.Helper.LauncherErr != nil:
+		fmt.Printf("    could not add it to the game launcher: %v\n", res.Helper.LauncherErr)
+	case res.Helper.LauncherChanged:
+		fmt.Printf("    also started from %s\n", res.Helper.Launcher)
+		fmt.Println("      (this machine launches the game from there; a backup of the")
+		fmt.Println("       original is beside it)")
+	case res.Helper.Launcher != "":
+		fmt.Printf("    also started from %s\n", res.Helper.Launcher)
+	}
+
+	// Say which of the three things is wrong. The old message covered a
+	// missing Preferences.ini and a missing host entry with the same words,
+	// and only one of them is fixed by re-running the installer.
+	if ok, why := installer.AllowlistState(inst.SaveDir); !ok {
 		fmt.Println()
-		fmt.Println("  WARNING: the allowlist still does not look right.")
-		fmt.Printf("  Check HttpAllowHosts in %s\n", filepath.Join(inst.SaveDir, "Preferences.ini"))
+		fmt.Println("  WARNING: network access is not set up.")
+		fmt.Printf("  %s\n", why)
 		return 1
 	}
 
@@ -411,27 +448,57 @@ func runCheck(target string) int {
 
 	problems := 0
 
-	if installer.AllowlistSatisfied(inst.SaveDir) {
-		fmt.Println("  Allowlist:      ok (127.0.0.1 is allowed)")
+	// Where the settings actually are, and which theme they name. An install
+	// that went into the wrong theme, or an allowlist warning that is really a
+	// missing Preferences.ini, both show up here and nowhere else.
+	fmt.Printf("  Save data:      %s\n", inst.SaveDir)
+	if cur := installer.CurrentTheme(inst.SaveDir); cur != "" {
+		fmt.Printf("  Theme in use:   %s\n", cur)
+	} else {
+		fmt.Println("  Theme in use:   NOT NAMED in Preferences.ini")
+		fmt.Println("    Without it the installer cannot tell which theme you play,")
+		fmt.Println("    and falls back to the first compatible one by name.")
+		problems++
+	}
+	fmt.Printf("  Module in:      %s\n", inst.ModuleThemeDir())
+	fmt.Println()
+
+	// Three separate failures, three separate answers. Collapsing them into
+	// one "the allowlist does not look right" sent people to re-run the
+	// installer when the real problem was that no Preferences.ini existed.
+	if ok, why := installer.AllowlistState(inst.SaveDir); ok {
+		fmt.Println("  Allowlist:      ok (127.0.0.1 allowed, HttpEnabled=1)")
 	} else {
 		problems++
 		fmt.Println("  Allowlist:      NOT SET")
-		fmt.Printf("    HttpEnabled/HttpAllowHosts in %s\n",
-			filepath.Join(inst.SaveDir, "Preferences.ini"))
-		fmt.Println("    Re-run this installer with ITGmania closed.")
+		fmt.Printf("    %s\n", why)
 	}
 
+	// Installed, running, and reachable are three different things, and only
+	// the last is what the game cares about.
 	switch {
 	case !installer.HelperInstalled(inst):
 		problems++
 		fmt.Println("  Local helper:   NOT INSTALLED")
+		fmt.Printf("    expected at %s\n", installer.HelperBinary(inst))
 		fmt.Println("    Re-run this installer.")
 	case installer.HelperRunning(inst):
-		fmt.Println("  Local helper:   running")
+		fmt.Println("  Local helper:   running and answering on loopback")
 	default:
 		problems++
-		fmt.Println("  Local helper:   installed, but NOT RUNNING right now")
-		fmt.Println("    The browser will not open until it is.")
+		fmt.Println("  Local helper:   installed, but NOT ANSWERING")
+		fmt.Printf("    binary:  %s\n", installer.HelperBinary(inst))
+		if cfg, err := os.Stat(installer.HelperConfigPath(inst)); err == nil {
+			fmt.Printf("    config:  %s (written %s)\n",
+				installer.HelperConfigPath(inst), cfg.ModTime().Format("2006-01-02 15:04:05"))
+			fmt.Println("    It published a config and then stopped or was killed.")
+			fmt.Println("    Run it in the foreground to see why:")
+		} else {
+			fmt.Printf("    config:  none at %s\n", installer.HelperConfigPath(inst))
+			fmt.Println("    It has never started successfully. Run it by hand to see why:")
+		}
+		fmt.Printf("      %s -helper -install-dir %s\n",
+			installer.HelperBinary(inst), inst.Root)
 	}
 
 	// Nothing registered is always wrong. Needing a desktop session is only
