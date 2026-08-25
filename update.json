@@ -1,10 +1,10 @@
 {
   "version": "0.2",
-  "notes": "Title menu no longer flashes when scrolling past Find Content; tab row no longer highlights the wrong tab; detail page and level-list fixes; network setup is localhost-only.",
+  "notes": "",
   "module": {
     "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.2/itgmania-content-browser-module-0.2.zip",
     "sha256": "304a91347039ff9421c4ac94640c0e816b1fb5d377a7f19ae300614c2f11f2ea",
     "bytes": 240439
   },
-  "minHelper": "0.1"
+  "minHelper": "0.2"
 }
