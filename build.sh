@@ -10,7 +10,12 @@ set -euo pipefail
 
 # The version lives in internal/branding, so a release is one line changed in
 # one file. Passing one here still overrides it for a throwaway build.
-BRANDED="$(sed -n 's/^\tVersion = "\(.*\)"$/\1/p' internal/branding/branding.go)"
+# [[:space:]] rather than \t: \t is a GNU extension, and BSD sed -- which is
+# what macOS ships, and what the macos-pkg job runs -- reads it as a literal
+# "t". The pattern then matched nothing there, BRANDED came back empty, and the
+# drift check below failed every tagged build on macOS while passing everywhere
+# else. A POSIX bracket expression means the same thing to both.
+BRANDED="$(sed -n 's/^[[:space:]]*Version = "\(.*\)"$/\1/p' internal/branding/branding.go)"
 VERSION="${1:-${BRANDED:-dev}}"
 OUT="dist"
 LDFLAGS="-s -w -X main.version=${VERSION}"

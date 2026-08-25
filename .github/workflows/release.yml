@@ -93,7 +93,11 @@ jobs:
       - name: Collect and checksum
         run: |
           mkdir -p dist
-          find artifacts -type f -exec cp {} dist/ ;
+          # The semicolon is escaped so find receives it as the -exec terminator
+          # rather than bash eating it as a command separator. Unescaped, find
+          # aborts with "missing argument to -exec", dist stays empty, and the
+          # checksum step below runs on nothing.
+          find artifacts -type f -exec cp {} dist/ \;
           cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
