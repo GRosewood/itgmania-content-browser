@@ -240,8 +240,11 @@ begin
       Lower := Lowercase(Line);
       if Pos('httpenabled=', Lower) = 1 then
         Enabled := (Trim(Copy(Line, Length('HttpEnabled=') + 1, Length(Line))) = '1');
+      // The one entry an install needs: the loopback helper, which relays
+      // the catalogue hosts itself. Checking for stepmaniaonline.net here
+      // failed every fresh install once the installer stopped writing it.
       if Pos('httpallowhosts=', Lower) = 1 then
-        Allowed := (Pos('stepmaniaonline.net', Lower) > 0) and (Pos('127.0.0.1', Lower) > 0);
+        Allowed := (Pos('127.0.0.1', Lower) > 0);
     end;
   end;
   Result := Enabled and Allowed;
@@ -288,11 +291,11 @@ begin
     Exit;
   end;
 
-  // The point of this installer: without the allowlist entry the module
-  // cannot reach stepmaniaonline.net, so never report success without
-  // reading the file back.
+  // The point of this installer: without the loopback entry the module
+  // cannot reach the helper that relays its reads, so never report success
+  // without reading the file back.
   if not AllowlistOK(ExpandConstant('{app}')) then
-    Fail('The module was installed, but network access was NOT enabled.' + #13#10 + '' + #13#10 + 'stepmaniaonline.net is missing from HttpAllowHosts in:' + #13#10 + PrefsPath(ExpandConstant('{app}')) + #13#10 + '' + #13#10 + 'With ITGmania closed, run "Enable Network Access.bat" from the' + #13#10 + 'Themes\Simply Love\Modules folder, or run Setup again.');
+    Fail('The module was installed, but network access was NOT enabled.' + #13#10 + '' + #13#10 + '127.0.0.1 (the local helper) is missing from HttpAllowHosts in:' + #13#10 + PrefsPath(ExpandConstant('{app}')) + #13#10 + '' + #13#10 + 'With ITGmania closed, run "Enable Network Access.bat" from the' + #13#10 + 'Themes\Simply Love\Modules folder, or run Setup again.');
 end;
 
 // Reflect a failed install on the final page rather than saying it finished.

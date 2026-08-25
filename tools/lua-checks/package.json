@@ -1,0 +1,8 @@
+{
+  "name": "lua-checks",
+  "private": true,
+  "description": "Static checks for the in-game module: syntax, block balance, and the two Lua 5.1 per-function limits it sits against.",
+  "dependencies": {
+    "luaparse": "^0.3.1"
+  }
+}

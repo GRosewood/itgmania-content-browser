@@ -61,14 +61,61 @@ type Remover func(pack string) (string, error)
 type Sweeper func() ([]string, error)
 
 // Previewer extracts one song's audio from a pack and reports where it landed,
-// along with the sample window the pack's author chose. preview.Fetcher.Get
-// satisfies it.
+// along with the sample window the pack's author chose. helper wiring wraps
+// preview.Fetcher.Get in it -- the concrete return types differ, so the wrap
+// is a closure, not an assignment.
 type Previewer func(packID int, song string) (any, error)
+
+// PackIniReader reports whether a pack's download carries a Pack.ini and what
+// it says about sync. helper wiring wraps preview.Fetcher.PackIni in it.
+type PackIniReader func(packID int) (any, error)
+
+// PackModsReader reports which of a pack's songs ship Lua of their own.
+// helper wiring wraps preview.Fetcher.PackMods in it.
+type PackModsReader func(packID int) (any, error)
+
+// PackCreditsReader reports who charted a pack, read out of the simfiles in
+// its archive -- the catalogue's credit index is sparse for older packs, and
+// the simfiles are the only account that can be trusted. helper wiring wraps
+// preview.Fetcher.PackCredits in it.
+type PackCreditsReader func(packID int) (any, error)
+
+// SpaceReader reports how much room is left where packs are installed, and how
+// much a pack would need. The game cannot answer either: Lua has no filesystem
+// beyond reading, and the install root is a preference this service resolves.
+type SpaceReader func() (free int64, root string, ok bool)
 
 // Reporter describes the extraction currently in flight, for a caller that
 // wants to draw a progress bar while waiting on Previewer. It must not block on
-// whatever lock the extraction holds. preview.Fetcher.Progress satisfies it.
+// whatever lock the extraction holds. helper wiring wraps
+// preview.Fetcher.Progress in it.
 type Reporter func() any
+
+// Starter begins a pack install and returns without waiting for it. The game
+// cannot do this for itself: every song folder is mounted at the same place, so
+// its unzip lands in whichever one the engine loaded first rather than the one
+// the player configured. packs.Installer.Start satisfies it.
+type Starter func(packID int, name string) error
+
+// Watcher reports every install this helper has run. packs.Installer.Status
+// satisfies it, once wrapped to return any.
+type Watcher func() any
+
+// SongStarter installs one song out of a pack. packs.Installer.StartSong
+// satisfies it.
+type SongStarter func(packID int, song, sync string) error
+
+// Updater answers whether a newer browser has been published, and installs it.
+// update.Checker satisfies it once its methods are wrapped to return any.
+//
+// The check lives out here rather than in the game because the engine will only
+// talk to hosts on its own allowlist, and asking players to widen that list to
+// see an update notice is a poor trade for a file this small.
+type Updater struct {
+	State    func() any
+	Start    func()
+	Progress func() any
+}
 
 // Server is a running loopback helper.
 type Server struct {
@@ -79,6 +126,14 @@ type Server struct {
 	tidy     Sweeper
 	preview  Previewer
 	progress Reporter
+	install  Starter
+	installs Watcher
+	single   SongStarter
+	update   Updater
+	packIni  PackIniReader
+	packMods PackModsReader
+	packCred PackCreditsReader
+	space    SpaceReader
 	ln       net.Listener
 	srv      *http.Server
 }
@@ -120,6 +175,16 @@ func New(saveDir, version string, remove Remover, tidy Sweeper) (*Server, error)
 	mux.HandleFunc("/tidy", s.handleTidy)
 	mux.HandleFunc("/preview", s.handlePreview)
 	mux.HandleFunc("/preview/progress", s.handleProgress)
+	mux.HandleFunc("/install", s.handleInstall)
+	mux.HandleFunc("/install/progress", s.handleInstalls)
+	mux.HandleFunc("/single", s.handleSingle)
+	mux.HandleFunc("/version", s.handleVersion)
+	mux.HandleFunc("/update", s.handleUpdate)
+	mux.HandleFunc("/update/progress", s.handleUpdates)
+	mux.HandleFunc("/packini", s.handlePackIni)
+	mux.HandleFunc("/space", s.handleSpace)
+	mux.HandleFunc("/fetch", s.handleFetch)
+	mux.HandleFunc("/credits", s.handleCredits)
 	s.srv = &http.Server{
 		Handler:           s.withGuards(mux),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -142,6 +207,29 @@ func (s *Server) SetPreviewer(p Previewer) { s.preview = p }
 // SetReporter attaches the progress source /preview/progress reads. Call it
 // before Serve.
 func (s *Server) SetReporter(r Reporter) { s.progress = r }
+
+// SetInstaller attaches pack installation. Call it before Serve.
+func (s *Server) SetInstaller(start Starter, watch Watcher) {
+	s.install, s.installs = start, watch
+}
+
+// SetSongInstaller attaches single-song installation. Call it before Serve.
+func (s *Server) SetSongInstaller(start SongStarter) { s.single = start }
+
+// SetUpdater attaches the self-update check. Call it before Serve.
+func (s *Server) SetUpdater(u Updater) { s.update = u }
+
+// SetPackIniReader attaches the archive Pack.ini check. Call it before Serve.
+func (s *Server) SetPackIniReader(r PackIniReader) { s.packIni = r }
+
+// SetPackModsReader attaches the archive Lua check. Call it before Serve.
+func (s *Server) SetPackModsReader(r PackModsReader) { s.packMods = r }
+
+// SetPackCreditsReader attaches the simfile credit scan. Call it before Serve.
+func (s *Server) SetPackCreditsReader(r PackCreditsReader) { s.packCred = r }
+
+// SetSpaceReader attaches the free-space check. Call it before Serve.
+func (s *Server) SetSpaceReader(r SpaceReader) { s.space = r }
 
 // Port is the loopback port the service bound.
 func (s *Server) Port() int { return s.ln.Addr().(*net.TCPAddr).Port }
@@ -196,6 +284,12 @@ func (s *Server) withGuards(next http.Handler) http.Handler {
 			return
 		}
 		got := r.Header.Get("X-Browser-Token")
+		if got == "" {
+			// The game's file-download path cannot set a header -- the engine
+			// issues that request itself -- so the token may ride in the query
+			// instead. Same token, same comparison; only the envelope differs.
+			got = r.URL.Query().Get("t")
+		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 			http.Error(w, "bad token", http.StatusForbidden)
 			return
@@ -344,6 +438,225 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "progress": s.progress(),
 	})
+}
+
+type installRequest struct {
+	Pack int    `json:"pack"`
+	Name string `json:"name"`
+}
+
+// handleInstall starts a download and returns at once. The work outlives the
+// request on purpose: a pack can be gigabytes, and the browser wants to carry
+// on drawing while it arrives.
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok": false, "error": "POST only",
+		})
+		return
+	}
+	if s.install == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "installing is unavailable",
+		})
+		return
+	}
+	var req installRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "bad request body",
+		})
+		return
+	}
+	if req.Pack <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "no pack given",
+		})
+		return
+	}
+	if err := s.install(req.Pack, strings.TrimSpace(req.Name)); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pack": req.Pack})
+}
+
+type singleRequest struct {
+	Pack int    `json:"pack"`
+	Song string `json:"song"`
+	// which singles folder to use. The caller decides, because it is the
+	// one that knows what SMO says about the pack; empty falls back to what
+	// the pack itself declares inside the archive.
+	Sync string `json:"sync"`
+}
+
+// handleSingle lifts one song out of a pack. Like /install it returns as soon
+// as the work is scheduled, and reports through the same queue.
+func (s *Server) handleSingle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok": false, "error": "POST only",
+		})
+		return
+	}
+	if s.single == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "single songs are unavailable",
+		})
+		return
+	}
+	var req singleRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "bad request body",
+		})
+		return
+	}
+	if req.Pack <= 0 || strings.TrimSpace(req.Song) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "no song given",
+		})
+		return
+	}
+	if err := s.single(req.Pack, strings.TrimSpace(req.Song),
+		strings.ToUpper(strings.TrimSpace(req.Sync))); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSpace reports the room left where packs land.
+//
+// A GET, and cheap: a download that would not fit is worth knowing about before
+// it starts rather than when the disk fills, and the browser asks each time it
+// is about to offer one.
+func (s *Server) handleSpace(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"ok": true, "free": nil, "root": nil}
+	if s.space != nil {
+		if free, root, fine := s.space(); fine {
+			out["free"], out["root"] = free, root
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type packIniRequest struct {
+	Pack int `json:"pack"`
+}
+
+// handlePackIni answers what a pack's download carries: a Pack.ini, and any
+// songs that ship Lua of their own.
+//
+// The catalogue is ambiguous about the first -- a pack with no sync tag might
+// have no Pack.ini, or might simply never have been tagged -- and silent about
+// the second. The archive is the only thing that actually knows either. It
+// costs the pack's zip index, which is a HEAD and its central directory over
+// ranged reads, and which a preview of the same pack has usually already paid
+// for.
+//
+// Both answers ride one request because the game has a single HTTP worker and
+// every request is serial: two round trips for two readings of one index would
+// be a second wait for nothing.
+func (s *Server) handlePackIni(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok": false, "error": "POST only",
+		})
+		return
+	}
+	if s.packIni == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "reading pack archives is unavailable",
+		})
+		return
+	}
+	var req packIniRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "bad request body",
+		})
+		return
+	}
+	if req.Pack <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false, "error": "no pack given",
+		})
+		return
+	}
+	info, err := s.packIni(req.Pack)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"ok": false, "error": err.Error(),
+		})
+		return
+	}
+	out := map[string]any{"ok": true, "packIni": info, "mods": nil}
+	// The index is already open and cached by the read above, so this is a walk
+	// over a list in memory. A failure here is not worth failing the Pack.ini
+	// answer over -- the browser draws what it was told and leaves out the rest.
+	if s.packMods != nil {
+		if mods, err := s.packMods(req.Pack); err == nil {
+			out["mods"] = mods
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleVersion reports what this build is, and whether a newer one exists.
+//
+// It always answers 200 with whatever it knows. A browser that cannot be told
+// about updates should draw itself exactly as it always has, so "the check
+// failed" and "there is nothing new" reach the game as the same shape and the
+// module has one thing to look at rather than two.
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"ok": true, "version": s.version, "update": nil}
+	if s.update.State != nil {
+		out["update"] = s.update.State()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleUpdate starts an update and returns at once, the same way an install
+// does: the game polls /update/progress to draw the bar.
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok": false, "error": "POST only",
+		})
+		return
+	}
+	if s.update.Start == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "updating is unavailable",
+		})
+		return
+	}
+	s.update.Start()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleUpdates reports how far the update has got.
+func (s *Server) handleUpdates(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"ok": true, "progress": nil}
+	if s.update.Progress != nil {
+		out["progress"] = s.update.Progress()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleInstalls reports where every install has got to. Polled while a
+// download runs, so it stays a plain GET that touches no lock the work holds.
+func (s *Server) handleInstalls(w http.ResponseWriter, r *http.Request) {
+	if s.installs == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "installs": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "installs": s.installs()})
 }
 
 // ReadConfig loads what a running helper published for this install. The

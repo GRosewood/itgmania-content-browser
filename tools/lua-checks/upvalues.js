@@ -50,9 +50,22 @@ lines.forEach((raw, i) => {
 // up to the next column-zero `end`.
 const funcs = [];
 lines.forEach((raw, i) => {
-  const m = /^local\s+function\s+([A-Za-z_]\w*)|^function\s+([A-Za-z_][\w.]*)/.exec(scrub(raw));
+  // Four shapes reach column zero: `local function F`, `function T.F`,
+  // `F = function(` (the mutually recursive pieces, whose names are
+  // forward-declared further up), and `local F = function(` (how the input
+  // handlers are written). A function the checker cannot see is a function
+  // with no ceiling on it, and two of these shapes went unmeasured until
+  // they were noticed.
+  const scrubbed = scrub(raw);
+  const m = /^local\s+function\s+([A-Za-z_]\w*)|^function\s+([A-Za-z_][\w.]*)|^local\s+([A-Za-z_]\w*)\s*=\s*function\s*\(|^([A-Za-z_][\w.]*)\s*=\s*function\s*\(/
+    .exec(scrubbed);
   if (!m) return;
-  const name = m[1] || m[2];
+  const name = m[1] || m[2] || m[3] || m[4];
+  // A one-line function -- the call-time forwarders are `local function F(...)
+  // return CB.F(...) end` on a single line -- has no body below it. Without
+  // this check the span runs to the next column-zero `end`, silently charging
+  // hundreds of unrelated lines to a one-line function.
+  if (/\bend\s*$/.test(scrubbed)) return;
   let close = -1;
   for (let j = i + 1; j < lines.length; j++) {
     if (/^end\b/.test(lines[j])) { close = j; break; }

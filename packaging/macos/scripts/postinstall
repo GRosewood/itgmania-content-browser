@@ -2,8 +2,8 @@
 # Runs after Installer.app copies the helper into place: installs the module,
 # enables the network allowlist, and verifies the allowlist actually landed.
 # A non-zero exit makes Installer.app report the failure instead of claiming
-# success, which matters because without the allowlist the module cannot reach
-# stepmaniaonline.net.
+# success, which matters because without the loopback entry the module cannot
+# reach the helper that relays its reads.
 set -uo pipefail
 
 HELPER="/usr/local/share/itgmania-content-browser/itgmania-content-browser-installer"
@@ -35,13 +35,16 @@ for PREFS in \
     "/Users/${CONSOLE_USER:-root}/Library/Application Support/ITGmania/Save/Preferences.ini" \
     "/Users/${CONSOLE_USER:-root}/.itgmania/Save/Preferences.ini"; do
     [ -f "$PREFS" ] || continue
-    if grep -qi '^[[:space:]]*HttpAllowHosts=.*stepmaniaonline\.net' "$PREFS" &&
+    # The loopback helper is the one entry an install needs -- it relays the
+    # catalogue hosts itself. Grepping for stepmaniaonline.net here failed
+    # every fresh install once the installer stopped writing it.
+    if grep -qi '^[[:space:]]*HttpAllowHosts=.*127\.0\.0\.1' "$PREFS" &&
        grep -qi '^[[:space:]]*HttpEnabled=1' "$PREFS"; then
         echo "network access enabled in $PREFS"
         exit 0
     fi
 done
 
-echo "network access was NOT enabled; add stepmaniaonline.net,*.stepmaniaonline.net" >&2
-echo "to the HttpAllowHosts line in Preferences.ini with ITGmania closed." >&2
+echo "network access was NOT enabled; add 127.0.0.1 to the" >&2
+echo "HttpAllowHosts line in Preferences.ini with ITGmania closed." >&2
 exit 1

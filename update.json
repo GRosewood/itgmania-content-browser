@@ -1,0 +1,10 @@
+{
+  "version": "0.1",
+  "notes": "First release.",
+  "module": {
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.1/itgmania-content-browser-module-0.1.zip",
+    "sha256": "718e864d3e31f929e19f0cdde279d34943b1aca27846243dcdf37f0ee88b5cb9",
+    "bytes": 231912
+  },
+  "minHelper": "0.1"
+}

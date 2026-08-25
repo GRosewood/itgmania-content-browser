@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,9 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"itgmania-content-browser/internal/branding"
 	"itgmania-content-browser/internal/helper"
 	"itgmania-content-browser/internal/installer"
+	"itgmania-content-browser/internal/packs"
 	"itgmania-content-browser/internal/preview"
+	"itgmania-content-browser/internal/update"
 )
 
 // runHelper is the -helper mode: the loopback service that deletes packs on
@@ -21,7 +25,10 @@ import (
 // other half of the Installed Packs screen. It is started as a login item and
 // exits when its published config file is removed, which is how the installer
 // stops it on uninstall.
-func runHelper(target string) int {
+// manifestURL is where update news is read from. It is a parameter so a fork
+// can point at its own, and so this can be tested against a local file without
+// publishing anything.
+func runHelper(target, manifestURL string) int {
 	hideConsole()
 
 	var inst installer.Install
@@ -53,17 +60,109 @@ func runHelper(target string) int {
 		return 1
 	}
 
-	// Song previews. These live under the browser's own data directory rather
-	// than anywhere the game scans, so an extracted song can never be mistaken
-	// for an installed one.
+	// Song previews. These live under the game's Cache directory -- they are
+	// refetchable bytes, which is what Cache is for, and on a cabinet Cache is
+	// the folder that sits on the big mounted drive. Nowhere the game scans
+	// for songs, so an extracted song can never be mistaken for an installed
+	// one; and the game reads the same folder from the inside as /Cache, so
+	// wherever the mount really points, both ends land on the same files.
+	//
+	// If Cache cannot be written the game itself is broken -- the engine keeps
+	// its own song cache there -- so that is reported and previews are let
+	// fail loudly rather than quietly kept somewhere the game will not look.
+	cacheDir, err := installer.CacheDir(inst)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper: %v (previews will not work)\n", err)
+		cacheDir = filepath.Join(filepath.Dir(inst.SaveDir), "Cache")
+	}
 	previews := preview.New(
-		filepath.Join(inst.SaveDir, "ITGmaniaContentBrowser", "previews"),
+		filepath.Join(cacheDir, "ITGmaniaContentBrowser", "previews"),
 		"https://stepmaniaonline.net")
 	previews.Clear() // anything left behind by a previous run is stale
+
+	// Earlier releases kept previews and the banner art under Save. Nothing on
+	// the update path deletes a file, and the game cannot, so this helper is
+	// the one thing that can retire those folders -- megabytes of artwork the
+	// browser will never look at again. Both paths are wholly this project's
+	// own, by name.
+	os.RemoveAll(filepath.Join(inst.SaveDir, "ITGmaniaContentBrowser", "previews"))
+	os.RemoveAll(filepath.Join(inst.SaveDir, "SMOFindContent"))
 	srv.SetPreviewer(func(packID int, song string) (any, error) {
 		return previews.Get(packID, song)
 	})
 	srv.SetReporter(func() any { return previews.Progress() })
+
+	// Installs go to the folder the player configured, which the engine's own
+	// unzip cannot be told to use. The root is resolved per install rather than
+	// now: a drive can be mounted long after this helper started.
+	installs := packs.New(
+		func() (string, error) { return installer.InstallRoot(inst) },
+		"https://stepmaniaonline.net")
+	// One song is lifted straight out of the pack archive over ranged reads --
+	// the same index the audio previews already built -- so taking one song from
+	// a four gigabyte pack costs about what that song weighs.
+	installs.InstallSong = func(packID int, title, root, sync string) (any, error) {
+		return previews.InstallSong(packID, title, root, sync)
+	}
+	srv.SetInstaller(installs.Start, func() any { return installs.Status() })
+	srv.SetSongInstaller(installs.StartSong)
+	srv.SetPackIniReader(func(packID int) (any, error) {
+		return previews.PackIni(packID)
+	})
+	srv.SetPackModsReader(func(packID int) (any, error) {
+		return previews.PackMods(packID)
+	})
+	srv.SetPackCreditsReader(func(packID int) (any, error) {
+		return previews.PackCredits(packID)
+	})
+	// The install root is resolved per call rather than now: a drive can be
+	// mounted, filled or swapped long after this helper started.
+	srv.SetSpaceReader(func() (int64, string, bool) {
+		root, err := installer.InstallRoot(inst)
+		if err != nil || root == "" {
+			return 0, "", false
+		}
+		free, ok := installer.FreeBytes(root)
+		return free, root, ok
+	})
+
+	// Updates. The helper checks and applies them because it is the half of
+	// this that can reach any host and write any file; the game only asks.
+	//
+	// It replaces the module, not itself: this binary is the one running, and
+	// on Windows a running executable cannot be overwritten. A release that
+	// needs a newer helper says so in its manifest, and the browser then points
+	// at the installer instead of pretending it can finish the job.
+	if manifestURL == "" {
+		manifestURL = branding.UpdateManifest
+	}
+	// The theme is resolved by finding the installed module, not by name: a
+	// player on a renamed Simply Love fork has the module in the fork, and an
+	// update written into a folder that merely shares the stock name would
+	// report success while changing nothing the player can see.
+	updates := update.New(
+		manifestURL, version,
+		filepath.Join(inst.ModuleThemeDir(), "Modules"),
+		installer.CopyModuleFiles)
+	// Warm the update answer off the game's serial path. The first /version
+	// used to perform the manifest fetch inline, and on a cabinet with no
+	// internet that held the game's ONLY HTTP worker for the full timeout --
+	// twenty seconds of every network thing the game wanted to do, queued
+	// behind a request that was never going to succeed.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		updates.State(ctx)
+	}()
+	srv.SetUpdater(helper.Updater{
+		State: func() any {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			return updates.State(ctx)
+		},
+		Start:    updates.Start,
+		Progress: func() any { return updates.Progress() },
+	})
 
 	// Two ways to stop: a signal, or the config file going away (which is what
 	// the uninstaller does, and what a second helper instance would cause).

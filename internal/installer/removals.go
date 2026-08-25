@@ -26,8 +26,11 @@ const tempDirProbe = "newdir.temp.newdir"
 // so the in-game "Installed Packs" screen asks the loopback helper to do it,
 // and the helper lands here.
 
-// SongRoots lists the directories a pack folder could live in for this install.
-// Portable installs keep Songs beside the binary; the rest keep it next to Save.
+// SongRoots lists the directories a pack folder could live in for this install:
+// the install's own Songs directory, wherever that is for this layout, plus any
+// writable song folder the player configured. The read-only ones are left out
+// on purpose -- nothing here should be deleting out of a tree the player
+// mounted read-only.
 func SongRoots(inst Install) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -45,6 +48,9 @@ func SongRoots(inst Install) []string {
 	add(filepath.Join(inst.Root, "Songs"))
 	if inst.SaveDir != "" {
 		add(filepath.Join(filepath.Dir(inst.SaveDir), "Songs"))
+	}
+	for _, dir := range AdditionalSongDirs(inst) {
+		add(dir)
 	}
 	return out
 }

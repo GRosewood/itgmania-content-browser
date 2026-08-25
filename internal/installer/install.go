@@ -58,6 +58,88 @@ func removeLegacy(modulesDir string) []string {
 	return removed
 }
 
+// CopyModuleFiles writes a payload into a Modules directory and reports what
+// it wrote, relative to that directory.
+//
+// It is separate from Apply because the in-game updater uses it on its own.
+// Apply also stops the loopback helper and lays down a fresh binary, which is
+// exactly what an update running *inside* that helper must not do; all the
+// updater wants is the files.
+//
+// progress, if given, is called before each file with how many have been
+// written and how many there are, so a caller can draw a bar.
+func CopyModuleFiles(modulesDir string, files fs.FS, progress func(done, total int)) ([]string, error) {
+	var names []string
+	if err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			names = append(names, p)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	var written []string
+	for i, p := range names {
+		if progress != nil {
+			progress(i, len(names))
+		}
+		data, err := fs.ReadFile(files, p)
+		if err != nil {
+			return written, err
+		}
+		// Keep the layout the payload has: the tab icons live in a
+		// subdirectory beside the module, and flattening them would put them
+		// where nothing looks for them.
+		rel := filepath.FromSlash(p)
+		dest := filepath.Join(modulesDir, rel)
+
+		// An archive off the network is walked by this same code, so refuse
+		// anything that climbs out of the directory it is meant to fill.
+		// fs.FS rejects such names already; this says so where it matters
+		// rather than resting on that.
+		if !within(modulesDir, dest) {
+			return written, fmt.Errorf("refusing %s: outside %s", p, modulesDir)
+		}
+		if dir := filepath.Dir(dest); dir != modulesDir {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return written, fmt.Errorf("creating %s: %w", dir, err)
+			}
+			chownLike(dir, modulesDir)
+		}
+
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(p, ".sh") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(dest, data, mode); err != nil {
+			return written, fmt.Errorf("writing %s: %w", dest, err)
+		}
+		// Handed back to whoever owns the theme. Installing with sudo would
+		// otherwise leave root-owned files that the in-game updater -- which
+		// runs as the player, through the helper -- cannot replace, so the
+		// browser would offer an update it could never finish.
+		chownLike(dest, modulesDir)
+		written = append(written, rel)
+	}
+	if progress != nil {
+		progress(len(names), len(names))
+	}
+	return written, nil
+}
+
+// within reports whether path sits inside root.
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // Apply copies the module payload into the install's Simply Love theme and
 // makes sure the network allowlist permits the pack index.
 func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
@@ -72,41 +154,13 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 	if err := os.MkdirAll(res.ModulesDir, 0o755); err != nil {
 		return res, fmt.Errorf("creating %s: %w", res.ModulesDir, err)
 	}
+	// a Modules/ this run had to create belongs to the theme above it
+	chownLike(res.ModulesDir, themeDir)
 
 	res.Replaced = removeLegacy(res.ModulesDir)
 
-	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		data, err := fs.ReadFile(files, p)
-		if err != nil {
-			return err
-		}
-		// Keep the layout the payload has: the tab icons live in a
-		// subdirectory beside the module, and flattening them would put them
-		// where nothing looks for them.
-		rel := filepath.FromSlash(p)
-		dest := filepath.Join(res.ModulesDir, rel)
-		if dir := filepath.Dir(dest); dir != res.ModulesDir {
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return fmt.Errorf("creating %s: %w", dir, err)
-			}
-		}
-
-		mode := os.FileMode(0o644)
-		if strings.HasSuffix(p, ".sh") {
-			mode = 0o755
-		}
-		if err := os.WriteFile(dest, data, mode); err != nil {
-			return fmt.Errorf("writing %s: %w", dest, err)
-		}
-		res.Written = append(res.Written, rel)
-		return nil
-	})
+	written, err := CopyModuleFiles(res.ModulesDir, files, nil)
+	res.Written = written
 	if err != nil {
 		return res, err
 	}
@@ -159,7 +213,10 @@ func setUpHelper(inst Install) HelperResult {
 // Uninstall removes the module files. Preferences.ini is left alone: other
 // things may rely on the hosts, and removing them is a one-line manual edit.
 func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
-	modulesDir := filepath.Join(inst.SimplyLoveDir(), "Modules")
+	// The theme that actually holds the module, so a fork install is cleaned
+	// out of the fork rather than out of a folder that merely has the stock
+	// name.
+	modulesDir := filepath.Join(inst.ModuleThemeDir(), "Modules")
 	removed := removeLegacy(modulesDir)
 
 	// Take the login item out first, then signal the running helper to exit by
@@ -197,5 +254,21 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 		}
 		return nil
 	})
-	return removed, err
+	if err != nil {
+		return removed, err
+	}
+
+	// The parts folder goes wholesale, not just file by file. The walk above
+	// removes what THIS payload ships, but the in-game updater never deletes
+	// anything, so a machine that has been through a release which renamed a
+	// part still holds the old name -- and a folder emptied of everything
+	// except orphans would survive its own uninstall forever. The folder is
+	// wholly this project's, by name, so taking all of it is taking ours.
+	partsDir := filepath.Join(modulesDir, "ITGmania Content Browser")
+	if isDir(partsDir) {
+		if rmErr := os.RemoveAll(partsDir); rmErr == nil {
+			removed = append(removed, "ITGmania Content Browser"+string(filepath.Separator)+" (leftover parts)")
+		}
+	}
+	return removed, nil
 }

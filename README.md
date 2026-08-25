@@ -85,11 +85,13 @@ binary and the config.
   you Browse.
 * **Copies the module** into `Themes/Simply Love/Modules/`, removing files from
   older versions so the module never loads twice.
-* **Enables network access** by adding `stepmaniaonline.net`,
-  `arrowcloud.dance` (which curates the featured grid, supplies its artwork
-  and dates its releases) and `127.0.0.1` (the
-  local delete helper) to `HttpAllowHosts` in `Preferences.ini`, and setting
-  `HttpEnabled=1`.
+* **Enables network access** by adding `127.0.0.1` to `HttpAllowHosts` in
+  `Preferences.ini` and setting `HttpEnabled=1`. That single entry is all the
+  game needs: the helper service relays the browser's reads to
+  stepmaniaonline.net, arrowcloud.dance and itgdb.net, and refuses to fetch
+  from anywhere else. (Where those hosts are already on the allowlist -- an
+  older install, or the manual scripts -- the browser still reads them
+  directly and skips the hop.)
 
 The preferences edit keeps every host already on your allowlist (GrooveStats
 keeps working), changes exactly one line, preserves CRLF endings, writes a
@@ -159,22 +161,98 @@ If you fork and publish this, change the module path in `go.mod` from
 `itgmania-content-browser` to your own and update the import in
 `cmd/content-browser-installer/main.go`.
 
+## Releasing
+
+Cutting a release is changing the version in **three places that must agree**
+-- `Version` in
+[internal/branding/branding.go](internal/branding/branding.go),
+`UP.VERSION` in the payload's `04 queues.lua`, and the `VERSION` stamp file
+inside the payload's parts folder -- plus tagging `v<version>`. The stamp is
+what a restarted helper reads to know which module is actually installed;
+without it every module-only update re-offers itself forever. `build.sh`
+refuses to build a release while any of the four disagree, and `mkmodulezip`
+refuses to cut an archive whose stamp does not match, so a drift fails the
+build instead of shipping.
+
+### Names that can never change
+
+The in-game updater only ever writes files -- nothing on that path deletes --
+and every shipped helper compiles these names in. Changing any of them
+strands or breaks every install in the field:
+
+* the entry file, `ITGmania Content Browser.lua`, by that name, directly in
+  `Modules/` (the updater re-roots its archive on wherever it finds that
+  name);
+* the parts folder beside it, `ITGmania Content Browser/`;
+* any part filename that has shipped in a release -- a renamed part's old
+  file lingers on every updated machine forever (harmlessly, because only
+  the entry file's list loads anything, but permanently).
+
+```bash
+./build.sh                 # reads the version from branding.go
+```
+
+Alongside the binaries this writes two things:
+
+* `dist/itgmania-content-browser-module-<version>.zip` -- the module payload,
+  which is what the in-game updater downloads. It is byte-for-byte reproducible
+  (entries sorted, timestamps fixed), so rebuilding the same source does not
+  invalidate a manifest that has already been published.
+* `dist/update.json` -- the manifest describing it.
+
+To publish, in this order: fill in `notes`, set `minHelper` to the oldest
+helper that can run this module, **upload the zip** to the matching
+`v<version>` GitHub release, **verify** the uploaded asset's sha256 matches
+the manifest (`curl -L <asset-url> | sha256sum`), and only then copy
+`dist/update.json` to the repository root and commit. The browser reads the
+manifest from `main`, so the commit is what makes the update live -- done
+first, it offers every player a download that does not exist yet.
+
+Raise `minHelper` whenever the module starts asking the helper for something an
+older one does not serve. The browser then tells players to run the installer
+rather than offering a button that cannot finish -- the helper is a running
+program and cannot replace itself in place on Windows.
+
+A fork points somewhere else with `UpdateManifest` in the same file, and the
+helper takes `-manifest <url>` to override it for a run, which is also how the
+update path is tested without publishing anything.
+
+### Headless cabinets
+
+The helper starts from a per-user login item (XDG autostart on Linux), so a
+cabinet that boots straight into the game with no desktop session never
+starts it -- and since a fresh install allowlists only `127.0.0.1` and
+relies on the helper to relay the catalogue hosts, the browser is dead there.
+Two ways out: start the helper from whatever starts the game (`content-browser-helper -helper`
+beside the game's own launch script), or run the Enable Network Access script
+once, which allowlists the catalogue hosts directly and lets the browser work
+without the helper (browsing and engine downloads; no deletes, previews or
+credits).
+
 ## Layout
 
 ```
 cmd/content-browser-installer/   console installer (the engine for all platforms)
   payload/Modules/               the Lua module, embedded into the binary
+    ITGmania Content Browser.lua   the entry point: the only file the theme
+                                   loads, and the map of everything below it
+    ITGmania Content Browser/      the browser itself, in numbered parts,
+                                   loaded in order by the entry point
+                                   (see the README in that folder)
+    ContentBrowserIcons/           tab, arrow and receptor artwork
 internal/
   assets/                        banner.jpg, embedded
   banner/                        terminal artwork rendering (+ tests)
-  branding/                      product name, author, slug in one place
+  branding/                      product name, author, slug, version
   helper/                        loopback delete service (+ tests)
   installer/                     discovery, Preferences.ini merge, copy,
                                  pack removal, login item (+ tests)
+  update/                        version check and in-game update (+ tests)
 packaging/
   windows/setup.iss              Inno Setup wizard + generated wizard bitmaps
   macos/                         productbuild .pkg, background art, postinstall
 tools/mkwizardart/               regenerates installer artwork from banner.jpg
+tools/mkmodulezip/               builds the update payload and its manifest
 build.sh                         every binary + available GUI installers
 ```
 
@@ -186,6 +264,19 @@ menu.
 
 ## License
 
-MIT, © Rosewood <rosewoodsteps@gmail.com>; see [LICENSE](LICENSE). The bundled artwork is licensed stock imagery and
-is not covered by the MIT grant — replace `internal/assets/banner.jpg` if you
-redistribute a fork.
+GNU General Public License, version 3 — © 2026 Rosewood
+<rosewoodsteps@gmail.com>; see [LICENSE](LICENSE) for the full text.
+
+This program is free software: you may redistribute it and modify it under the
+terms of the GPL version 3 as published by the Free Software Foundation. It is
+distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+A copy of the licence ships with the module itself, as
+`ITGmania Content Browser LICENSE.txt` beside the module in
+`Themes/Simply Love/Modules/`, so a player who only ever receives the module
+still receives the terms with it.
+
+The bundled artwork is licensed stock imagery and is **not** covered by the GPL
+grant — replace `internal/assets/banner.jpg` if you redistribute a fork.

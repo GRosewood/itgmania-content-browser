@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+// all returns the stock allowlist as one comma-separated string, so the cases
+// below describe behaviour rather than restating the list. Spelling it out per
+// case meant adding one host broke six tests that were not about that host.
+func all(prefix ...string) string {
+	return strings.Join(append(append([]string{}, prefix...), Hosts...), ",")
+}
+
 func TestMergeHosts(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -15,39 +22,42 @@ func TestMergeHosts(t *testing.T) {
 		changed bool
 	}{
 		{
-			name:    "adds to the stock allowlist",
+			name:    "adds to the stock allowlist, keeping what was there",
 			in:      "*.groovestats.com,*.itgmania.com",
-			want:    "*.groovestats.com,*.itgmania.com,stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			want:    all("*.groovestats.com", "*.itgmania.com"),
 			changed: true,
 		},
 		{
 			name:    "already present is a no-op",
-			in:      "*.groovestats.com,stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
-			want:    "*.groovestats.com,stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			in:      all("*.groovestats.com"),
+			want:    all("*.groovestats.com"),
 			changed: false,
 		},
 		{
 			name:    "case-insensitive match is a no-op",
-			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
-			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,127.0.0.1",
+			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,127.0.0.1",
 			changed: false,
 		},
 		{
-			name:    "empty list gets both hosts",
+			name:    "empty list gets the whole allowlist",
 			in:      "",
-			want:    "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			want:    all(),
 			changed: true,
 		},
 		{
 			name:    "whitespace and duplicates are cleaned up",
 			in:      " *.groovestats.com , *.groovestats.com ,, ",
-			want:    "*.groovestats.com,stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			want:    all("*.groovestats.com"),
 			changed: true,
 		},
 		{
-			name:    "partial presence adds only the missing host",
+			// A leftover direct-host entry from the days the allowlist carried
+			// seven is kept -- the module still prefers direct where it can --
+			// and only the loopback entry is added.
+			name:    "partial presence adds only what is missing",
 			in:      "stepmaniaonline.net",
-			want:    "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,127.0.0.1",
+			want:    all("stepmaniaonline.net"),
 			changed: true,
 		},
 	}

@@ -10,15 +10,22 @@ import (
 	"time"
 )
 
-// Hosts added to ITGmania's allowlist so the module can reach the pack index.
-// 127.0.0.1 is the loopback helper: the game cannot delete files itself, so
-// the browser asks a local service to do it. HttpAllowHosts matches on host
-// only, so this is what makes http://127.0.0.1:<port> reachable from Lua.
+// Hosts added to ITGmania's allowlist: one entry, the loopback helper.
+//
+// It used to be seven -- stepmaniaonline.net, arrowcloud.dance, itgdb.net and
+// their wildcard forms -- because the game read those sites directly. The
+// helper now relays them: the browser asks 127.0.0.1 for an outside URL, and
+// the helper -- which can reach anything but agrees to reach only those three
+// hosts -- fetches it. So the one line the game's allowlist needs is the one
+// that makes the helper reachable, and Preferences.ini is touched as lightly
+// as it can be.
+//
+// The module still prefers a direct request wherever the machine's allowlist
+// happens to permit one (installs upgraded from the seven-entry days keep
+// their entries and keep going direct), and the manual Enable Network Access
+// scripts still write the full list, because a hand-copied install has no
+// helper to relay for it.
 var Hosts = []string{
-	"stepmaniaonline.net", "*.stepmaniaonline.net",
-	// arrowcloud.dance curates the featured strip; its API and its banner
-	// assets are on separate subdomains
-	"arrowcloud.dance", "*.arrowcloud.dance",
 	"127.0.0.1",
 }
 
@@ -98,6 +105,8 @@ func EnsureAllowlist(saveDir string) (PrefsResult, error) {
 		if err := os.WriteFile(res.Path, []byte(body), 0o644); err != nil {
 			return res, fmt.Errorf("writing %s: %w", res.Path, err)
 		}
+		// a Preferences.ini made for somebody else has to belong to them
+		chownLike(res.Path, saveDir)
 		res.Changed, res.Created, res.AllowHosts = true, true, hosts
 		return res, nil
 	}
@@ -193,6 +202,7 @@ func EnsureAllowlist(saveDir string) (PrefsResult, error) {
 	if err := os.WriteFile(res.BackupPath, raw, 0o644); err != nil {
 		return res, fmt.Errorf("writing backup %s: %w", res.BackupPath, err)
 	}
+	chownLike(res.BackupPath, res.Path)
 
 	body := strings.Join(out, newline) + newline
 	if err := writeFileAtomic(res.Path, []byte(body)); err != nil {
@@ -204,8 +214,19 @@ func EnsureAllowlist(saveDir string) (PrefsResult, error) {
 
 // writeFileAtomic writes via a temp file in the same directory then renames,
 // so an interrupted run cannot leave a half-written Preferences.ini.
+// The rename is also what makes ownership a problem worth handling: the file
+// that ends up in place is the temp one, created by whoever is running this. On
+// a cabinet set up with sudo that is root, and a root-owned Preferences.ini
+// cannot be rewritten by the player's game -- which rewrites the whole file
+// every time it exits, so their settings would quietly stop persisting from
+// here on. The new file is handed back to whoever owned the old one.
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
+	model := path
+	if _, err := os.Stat(model); err != nil {
+		// no file to inherit from; the directory it lives in will do
+		model = dir
+	}
 	tmp, err := os.CreateTemp(dir, ".fc-tmp-*")
 	if err != nil {
 		return err
@@ -224,6 +245,7 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	chownLike(tmpName, model)
 	// Windows will not rename onto an existing file.
 	_ = os.Remove(path)
 	return os.Rename(tmpName, path)

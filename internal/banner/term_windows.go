@@ -8,10 +8,7 @@ import (
 	"unsafe"
 )
 
-const (
-	enableVirtualTerminalProcessing = 0x0004
-	stdOutputHandle                 = ^uintptr(10) + 1 // -11
-)
+const enableVirtualTerminalProcessing = 0x0004
 
 var kernel32 = syscall.NewLazyDLL("kernel32.dll")
 

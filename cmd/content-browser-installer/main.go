@@ -4,6 +4,20 @@
 //
 // It is a single self-contained binary: the module payload is embedded, so
 // there is nothing to unzip and no files for the user to move by hand.
+//
+// Copyright (C) 2026 Rosewood <rosewoodsteps@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License, version 3, as published
+// by the Free Software Foundation.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program.  If not, see <https://www.gnu.org/licenses/>.
 package main
 
 import (
@@ -27,7 +41,10 @@ import (
 //go:embed all:payload
 var payloadFS embed.FS
 
-var version = "dev" // overridden at build time with -ldflags
+// version is what this build calls itself. branding.Version is the source of
+// truth -- build.sh reads the same constant -- and -ldflags can still override
+// it for a one-off build.
+var version = branding.Version
 
 func main() {
 	var (
@@ -41,12 +58,16 @@ func main() {
 		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
 		helperFlag    = flag.Bool("helper", false, "run the loopback service the in-game browser uses to delete packs")
+		manifestFlag  = flag.String("manifest", "", "where the helper looks for update news (default: the published one)")
 	)
 	flag.Parse()
 
 	if *versionFlag {
 		fmt.Printf("%s-installer %s (%s/%s)\n", branding.Slug, version, runtime.GOOS, runtime.GOARCH)
 		fmt.Printf("%s by %s\n", branding.Name, branding.Author)
+		fmt.Println("License GPLv3: GNU GPL version 3 <https://gnu.org/licenses/gpl-3.0.html>")
+		fmt.Println("This is free software: you are free to change and redistribute it.")
+		fmt.Println("There is NO WARRANTY, to the extent permitted by law.")
 		return
 	}
 
@@ -64,7 +85,7 @@ func main() {
 	// -helper is a long-running service, not an install run; it never draws
 	// chrome and never prompts.
 	if *helperFlag {
-		os.Exit(runHelper(*targetFlag))
+		os.Exit(runHelper(*targetFlag, *manifestFlag))
 	}
 
 	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag,
@@ -133,8 +154,28 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	}
 
 	if listThemes {
+		// Also where the settings came from, and which theme they name. When an
+		// install goes into the wrong theme it is nearly always because neither
+		// of those could be read, and this is the one command that says so
+		// without changing anything.
 		for _, in := range installs {
 			fmt.Printf("  %s\n", in.Root)
+			fmt.Printf("    save data:    %s\n", in.SaveDir)
+			if installer.RunningAsAnother(in.SaveDir) {
+				fmt.Println("    owner:        that profile belongs to another user")
+				fmt.Println("                  (running as root; files are handed back)")
+			}
+			if !in.PrefsFound {
+				fmt.Println("    settings:     no Preferences.ini here")
+			} else if cur := installer.CurrentTheme(in.SaveDir); cur != "" {
+				fmt.Printf("    theme in use: %s\n", cur)
+			} else {
+				fmt.Println("    theme in use: not named in Preferences.ini")
+			}
+			if installer.GameRunning() {
+				fmt.Println("    note:         ITGmania looks like it is running")
+			}
+			fmt.Println()
 			for _, t := range installer.Themes(in) {
 				fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
 			}
@@ -194,9 +235,19 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		if cur := installer.CurrentTheme(inst.SaveDir); cur != "" {
 			fmt.Printf("            (this install currently uses %q; switch to %q to see it)\n",
 				cur, theme.Name)
+		} else {
+			fmt.Println("            (which theme this install uses could not be read)")
 		}
 	}
 	fmt.Printf("  Save:     %s\n", inst.SaveDir)
+	if !inst.PrefsFound {
+		// Network access is a preference, so it lives in this file. Saying the
+		// file was not there is the difference between "it did not work" and
+		// "run the game once, then try again".
+		fmt.Println("            (no Preferences.ini here yet -- if the browser says")
+		fmt.Println("             network access is off, run ITGmania once and")
+		fmt.Println("             then this installer again)")
+	}
 	fmt.Println()
 
 	// ITGmania rewrites Preferences.ini from memory on exit, so a running
@@ -219,8 +270,9 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 			fmt.Printf("    %s\n", name)
 		}
 		fmt.Println()
-		fmt.Println("  The stepmaniaonline.net entries were left in Preferences.ini.")
-		fmt.Println("  Remove them by hand if you want them gone.")
+		fmt.Println("  Whatever HttpAllowHosts entries the install added were left in")
+		fmt.Println("  Preferences.ini (127.0.0.1 on recent installs; older ones also")
+		fmt.Println("  named the catalogue hosts). Remove them by hand if you want.")
 		return 0
 	}
 
@@ -248,7 +300,7 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	case res.Prefs.Created:
 		fmt.Println("  Network access: enabled (created Preferences.ini)")
 	case res.Prefs.Changed:
-		fmt.Println("  Network access: enabled (stepmaniaonline.net added to HttpAllowHosts)")
+		fmt.Println("  Network access: enabled (127.0.0.1 added to HttpAllowHosts -- the helper relays the rest)")
 		if res.Prefs.BackupPath != "" {
 			fmt.Printf("    backup: %s\n", filepath.Base(res.Prefs.BackupPath))
 		}
@@ -295,7 +347,6 @@ func describe(inst installer.Install) string {
 	return strings.Join(bits, "  |  ")
 }
 
-// choose asks which install to use and returns a 0-based index.
 // describeTheme is the one-line verdict beside a theme in a listing.
 func describeTheme(t installer.Theme) string {
 	var bits []string
@@ -324,6 +375,7 @@ func listThemeTable(themes []installer.Theme) {
 	fmt.Println()
 }
 
+// choose asks which install to use and returns a 0-based index.
 func choose(n int) int {
 	reader := bufio.NewReader(os.Stdin)
 	for {

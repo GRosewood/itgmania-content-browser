@@ -26,6 +26,15 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "not gofmt'd:"; echo "$unformatted"; exit 1
           fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lua checks (syntax, blocks, limits, wiring, names)
+        run: |
+          # luaparse first: without it syntax.js -- the strictest of the
+          # checks -- passes with a SKIP instead of parsing anything.
+          npm install --prefix tools/lua-checks
+          node tools/lua-checks/check.js
 
   build:
     needs: test
@@ -75,7 +84,7 @@ jobs:
 
   release:
     needs: [build, macos-pkg]
-    if: startsWith(github.ref, refs/tags/v)
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

@@ -52,6 +52,13 @@ function poly(p, verts, r) {
 const rectRing = (p, cx, cy, hw, hh, r, t) =>
   Math.abs(roundRect(p, cx, cy, hw, hh, r)) - t / 2;
 
+// The arrow the chart preview scrolls: a head and a tail, pointing up, in the
+// proportions cel uses. Shared so the body, its inner line and the receptor
+// can never drift out of shape with one another.
+const arrow = p => uni(
+  poly(p, [[0.50, 0.10], [0.92, 0.52], [0.08, 0.52]], 0.030),
+  roundRect(p, 0.50, 0.66, 0.150, 0.220, 0.050));
+
 // ------------------------------------------------------------------ icons
 const ICONS = {
   // a magnifier
@@ -66,6 +73,25 @@ const ICONS = {
     roundRect(p, 0.19, 0.50, 0.165, 0.165, 0.05),
     roundRect(p, 0.81, 0.50, 0.165, 0.165, 0.05),
     roundRect(p, 0.50, 0.50, 0.135, 0.135, 0.04)),
+
+  // Two pads side by side, for doubles: one player standing across both.
+  //
+  // Each pad is square, which is the whole point of the shape -- a dance pad
+  // is as wide as it is deep. Spacing the buttons further apart vertically
+  // than horizontally to fill a square canvas, which is what this used to do,
+  // drew two pads that had been stood on: correct in outline and wrong in
+  // every proportion. Two square pads in a square canvas leave room above and
+  // below instead, which is what being half as wide actually looks like.
+  doubles: p => {
+    const s = 0.145;   // button centre to pad centre, the same both ways
+    const b = 0.070;   // half a button
+    const half = (q, ox) => uni(
+      roundRect(q, ox,     0.50 - s, b, b, 0.024),
+      roundRect(q, ox,     0.50 + s, b, b, 0.024),
+      roundRect(q, ox - s, 0.50,     b, b, 0.024),
+      roundRect(q, ox + s, 0.50,     b, b, 0.024));
+    return uni(half(p, 0.25), half(p, 0.75));
+  },
 
   // a keyboard
   keyboard: p => uni(
@@ -114,12 +140,75 @@ const ICONS = {
   // a triangle that is visibly too small.
   play: p => poly(p, [[0.30, 0.19], [0.80, 0.50], [0.30, 0.81]], 0.055),
 
-  // an arrow landing on a shelf
+  // a plain filled dot, for the featured strip's page indicator. Squares read
+  // as debris at five pixels across; a circle reads as a dot.
+  dot: p => disc(p, 0.50, 0.50, 0.42),
+
+  // a radio button, in both of its states
+  radiooff: p => ring(p, 0.50, 0.50, 0.34, 0.10),
+  radioon: p => uni(
+    ring(p, 0.50, 0.50, 0.34, 0.10),
+    disc(p, 0.50, 0.50, 0.17)),
+
+  // an arrow dropping into an open tray. Deliberately not the same shape as
+  // the Installed tab's icon, which is an arrow onto a bare shelf: one means
+  // 'fetch this', the other means 'already here'.
+  download: p => uni(
+    cap(p, 0.50, 0.09, 0.50, 0.50, 0.060),   // shaft
+    cap(p, 0.27, 0.35, 0.50, 0.58, 0.060),   // left barb
+    cap(p, 0.73, 0.35, 0.50, 0.58, 0.060),   // right barb
+    cap(p, 0.15, 0.88, 0.85, 0.88, 0.060),   // tray floor
+    cap(p, 0.15, 0.68, 0.15, 0.88, 0.060),   // tray walls
+    cap(p, 0.85, 0.68, 0.85, 0.88, 0.060)),
+
+  // A note and its receptor, for the chart the sample is playing. One arrow
+  // pointing up, turned four ways by the screen -- so the four directions can
+  // never drift apart from each other, and doubles costs nothing extra.
+  note: p => arrow(p),
+  receptor: p => Math.abs(arrow(p)) - 0.045,
+
+  // The pale line that runs just inside the arrow every ITG skin draws, cel
+  // included. It is a second image rather than part of the first because it is
+  // the one part that must not take the quantization colour: the body says
+  // which quantization, the line stays white, and tinting one graphic would
+  // have taken both.
+  //
+  // Inset rather than an outer border. Measured off cel: the line sits about a
+  // twentieth of the arrow in from its edge and is about that thick, which is
+  // thin enough to read as an edge and not as a second arrow.
+  noteedge: p => Math.abs(arrow(p) + 0.048) - 0.021,
+
   installed: p => uni(
     cap(p, 0.50, 0.14, 0.50, 0.55, 0.062),
     cap(p, 0.27, 0.42, 0.50, 0.65, 0.062),
     cap(p, 0.73, 0.42, 0.50, 0.65, 0.062),
     cap(p, 0.17, 0.86, 0.83, 0.86, 0.062)),
+};
+
+// Icons that are not square. The SDF works in units of the icon HEIGHT, so x
+// runs 0..aspect and every radius means the same thing on both axes -- which is
+// the whole reason the shapes above can be written as fractions at all.
+const WIDE = {
+  // What a pack with no banner shows instead.
+  //
+  // Banner-shaped rather than square, so it fills the slot the real one would
+  // have filled: a row of packs where one is missing its art should still be a
+  // row, not a row with a hole and a small square in it.
+  //
+  // The classic picture placeholder -- a frame, a sun, a horizon -- because it
+  // is read as "no image here" without a caption in any language.
+  nobanner: {
+    aspect: 256 / 80,
+    sdf: (p, A) => {
+      const cx = A / 2, cy = 0.5;
+      const frame = rectRing(p, cx, cy, 0.62, 0.34, 0.07, 0.052);
+      const sun = disc(p, cx - 0.30, cy - 0.12, 0.058);
+      const hill = uni(
+        poly(p, [[cx - 0.42, cy + 0.26], [cx - 0.14, cy - 0.04], [cx + 0.14, cy + 0.26]], 0.02),
+        poly(p, [[cx - 0.06, cy + 0.26], [cx + 0.18, cy + 0.02], [cx + 0.42, cy + 0.26]], 0.02));
+      return uni(frame, sun, hill);
+    },
+  },
 };
 
 // ------------------------------------------------------------- png writing
@@ -181,4 +270,24 @@ for (const [name, sdf] of Object.entries(ICONS)) {
   fs.writeFileSync(file, png(N, N, rgba));
   console.log("  " + name + ".png");
 }
-console.log("\n" + Object.keys(ICONS).length + " icons at " + N + "x" + N);
+
+for (const [name, spec] of Object.entries(WIDE)) {
+  const h = N, w = Math.round(N * spec.aspect);
+  const rgba = Buffer.alloc(w * h * 4);
+  const px = 1 / h;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = { x: (x + 0.5) * px, y: (y + 0.5) * px };
+      const d = spec.sdf(p, spec.aspect);
+      const a = Math.max(0, Math.min(1, 0.5 - d / px));
+      const i = (y * w + x) * 4;
+      rgba[i] = 255; rgba[i + 1] = 255; rgba[i + 2] = 255;
+      rgba[i + 3] = Math.round(a * 255);
+    }
+  }
+  fs.writeFileSync(OUT + "/" + name + ".png", png(w, h, rgba));
+  console.log("  " + name + ".png  (" + w + "x" + h + ")");
+}
+
+console.log("\n" + (Object.keys(ICONS).length + Object.keys(WIDE).length)
+  + " icons at " + N + "px tall");

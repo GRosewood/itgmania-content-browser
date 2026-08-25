@@ -2,24 +2,66 @@ package installer
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Install describes one ITGmania installation found on this machine.
 type Install struct {
-	Root      string // install root (contains Themes/, Program/ or the app bundle)
-	SaveDir   string // where Preferences.ini lives (portable: <root>/Save)
-	ThemesDir string // <root>/Themes
-	Portable  bool   // Save lives beside the install rather than in the user profile
-	Version   string // best-effort, may be empty
-	HasSimply bool   // at least one theme here can load the module
+	Root    string // install root (contains Themes/, Program/ or the app bundle)
+	SaveDir string // where Preferences.ini lives (portable: <root>/Save)
+	// PrefsFound is whether a Preferences.ini was actually there. When it was
+	// not, nothing can say which theme is in use, and the allowlist is being
+	// written into a file the game has not created yet.
+	PrefsFound bool
+	ThemesDir  string // <root>/Themes
+	Portable   bool   // Save lives beside the install rather than in the user profile
+	Version    string // best-effort, may be empty
+	HasSimply  bool   // at least one theme here can load the module
 
 	// ThemeDir is the theme chosen for this run. Empty means "work it out",
 	// which is what everything except an explicit choice wants.
 	ThemeDir string
+}
+
+// ModuleThemeDir returns the theme directory the installed module actually
+// lives in, which is where an update must land.
+//
+// SimplyLoveDir answers a different question -- "where would an install go?"
+// -- and answering it here loses on forks: a player running a renamed Simply
+// Love fork has the module in the fork, but a fresh discovery has no ThemeDir,
+// so the fallback picks whatever folder is literally called "Simply Love".
+// The updater would then write 44 files into a theme nobody is running,
+// report success, and change nothing the player can see.
+//
+// So this looks for the module itself. The theme named in Preferences.ini is
+// believed first, because that is the one the game is drawing; failing that,
+// any theme holding the module; failing that, wherever an install would go,
+// which at least fails in the obvious place rather than a hidden one.
+func (i Install) ModuleThemeDir() string {
+	has := func(themeDir string) bool {
+		return themeDir != "" &&
+			isFile(filepath.Join(themeDir, "Modules", "ITGmania Content Browser.lua"))
+	}
+	if current := preference(i.SaveDir, "Theme"); current != "" {
+		dir := filepath.Join(i.ThemesDir, current)
+		if has(dir) {
+			return dir
+		}
+	}
+	entries, err := os.ReadDir(i.ThemesDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() && has(filepath.Join(i.ThemesDir, e.Name())) {
+				return filepath.Join(i.ThemesDir, e.Name())
+			}
+		}
+	}
+	return i.SimplyLoveDir()
 }
 
 // SimplyLoveDir returns the Simply Love theme directory for this install.
@@ -70,7 +112,9 @@ func candidateRoots() []string {
 		}
 	}
 
-	home, _ := os.UserHomeDir()
+	// the same home the Save directory is worked out from, so a sudo
+	// install searches the cabinet user's profile rather than root's
+	home := homeDir()
 
 	switch runtime.GOOS {
 	case "windows":
@@ -129,24 +173,52 @@ func candidateRoots() []string {
 	return out
 }
 
+// homeDir is the home of the person running this, which is not always the home
+// of the account the process is under.
+//
+// Installing onto a cabinet is usually done with sudo, and sudo hands the
+// process root's environment: HOME becomes /root, and every per-user path
+// derived from it -- the search list, the Save directory -- points somewhere
+// the game has never looked. That is how an install ends up writing a
+// Preferences.ini nobody reads. SUDO_USER is who actually asked.
+func homeDir() string {
+	if who := os.Getenv("SUDO_USER"); who != "" && who != "root" {
+		if u, err := user.Lookup(who); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
+
 // userSaveDir is where a non-portable install keeps Save/.
 func userSaveDir() string {
-	home, _ := os.UserHomeDir()
+	return saveUnderHome(homeDir())
+}
+
+// saveUnderHome is where ITGmania keeps Save/ under a given home directory.
+// Split out from userSaveDir so the same rule can be asked of somebody else s
+// home -- which is the whole problem on a cabinet set up with sudo.
+func saveUnderHome(home string) string {
 	switch runtime.GOOS {
 	case "windows":
+		// Windows keeps it under the roaming profile rather than the home
+		// directory, and there is only ever the one.
 		if appData := os.Getenv("APPDATA"); appData != "" {
 			return filepath.Join(appData, "ITGmania", "Save")
 		}
+		return ""
 	case "darwin":
-		if home != "" {
-			return filepath.Join(home, "Library", "Application Support", "ITGmania", "Save")
+		if home == "" {
+			return ""
 		}
+		return filepath.Join(home, "Library", "Application Support", "ITGmania", "Save")
 	default:
-		if home != "" {
-			return filepath.Join(home, ".itgmania", "Save")
+		if home == "" {
+			return ""
 		}
+		return filepath.Join(home, ".itgmania", "Save")
 	}
-	return ""
 }
 
 // Inspect turns a candidate directory into an Install, or returns ok=false if
@@ -181,28 +253,72 @@ func Inspect(root string) (Install, bool) {
 
 	inst := Install{Root: root, ThemesDir: themes}
 
-	// Portable installs keep Save/ beside the install and ship Portable.ini.
+	// Which Save directory the game actually reads.
+	//
+	// Getting this wrong is quiet and expensive: the network allowlist is
+	// written into Preferences.ini, and the theme in use is read out of it, so
+	// picking the wrong one both fails to enable the browser and installs it
+	// into whichever theme happened to sort first.
 	localSave := filepath.Join(root, "Save")
-	portableMarker := isFile(filepath.Join(root, "Portable.ini"))
-	switch {
-	case portableMarker:
+	if isFile(filepath.Join(root, "Portable.ini")) {
+		// the marker is definitive; nothing else gets a say
 		inst.Portable = true
 		inst.SaveDir = localSave
-	case isDir(localSave) && isFile(filepath.Join(localSave, "Preferences.ini")):
-		// no marker but a populated local Save: treat as portable
-		inst.Portable = true
-		inst.SaveDir = localSave
-	default:
-		if us := userSaveDir(); us != "" {
-			inst.SaveDir = us
-		} else {
-			inst.SaveDir = localSave
-		}
+	} else {
+		inst.SaveDir, inst.PrefsFound = pickSaveDir(localSave, saveDirCandidates(root))
+		inst.Portable = inst.SaveDir == localSave
+	}
+	if !inst.PrefsFound {
+		inst.PrefsFound = isFile(filepath.Join(inst.SaveDir, "Preferences.ini"))
 	}
 
 	inst.HasSimply = len(CompatibleThemes(inst)) > 0
 	inst.Version = detectVersion(root)
 	return inst, true
+}
+
+// saveDirCandidates is every Save directory a profile might keep, best guess
+// first. See candidateHomes for why there is more than one.
+func saveDirCandidates(root string) []string {
+	var out []string
+	for _, home := range candidateHomes(root) {
+		if dir := saveUnderHome(home); dir != "" {
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+// pickSaveDir chooses between the Save beside the install and the profiles that
+// might hold one, and says whether any of them had a Preferences.ini.
+//
+// Whichever holds that file is the one the game reads. When more than one does
+// -- a portable copy beside a stale profile, or a machine with several accounts
+// -- the most recently written wins, because the engine rewrites the whole file
+// every time it exits, so the live one is always the freshest.
+func pickSaveDir(localSave string, profiles []string) (string, bool) {
+	best, bestWhen, found := "", time.Time{}, false
+	for _, dir := range append([]string{localSave}, profiles...) {
+		if dir == "" {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, "Preferences.ini"))
+		if err != nil {
+			continue
+		}
+		if !found || info.ModTime().After(bestWhen) {
+			best, bestWhen, found = dir, info.ModTime(), true
+		}
+	}
+	if found {
+		return best, true
+	}
+	// None exists yet. A fresh run will make one in the first profile we would
+	// have looked in, unless there is no profile at all.
+	if len(profiles) > 0 {
+		return profiles[0], false
+	}
+	return localSave, false
 }
 
 // detectVersion makes a best effort at the installed ITGmania version. The
