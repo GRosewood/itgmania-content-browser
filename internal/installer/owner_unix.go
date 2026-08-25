@@ -23,6 +23,7 @@ package installer
 
 import (
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -131,4 +132,50 @@ func RunningAsAnother(path string) bool {
 	}
 	uid, _, ok := fileOwner(path)
 	return ok && uid != os.Geteuid()
+}
+
+// chownToGameUser hands a path to the account that plays.
+//
+// chownLike copies the owner of a neighbouring path, which is right for
+// Preferences.ini -- it lives in the player's own profile -- and wrong for the
+// module. ITGmania's own Linux installer requires root and unpacks the game
+// into /opt/itgmania, so the theme directory and everything under it is owned
+// by root. Copying that owner left the module root-owned, and the in-game
+// updater runs as the player through the helper: it could see an update, fetch
+// it, and then fail to replace a single file.
+//
+// Directories matter more than files here. Replacing a file means unlinking
+// and creating it, which needs write permission on the DIRECTORY, so the
+// Modules directory and our parts folder are the ones that have to belong to
+// the player.
+func chownToGameUser(path string, u GameUser) {
+	if !isRoot() || u.Uid <= 0 {
+		return
+	}
+	_ = os.Lchown(path, u.Uid, u.Gid)
+}
+
+// runAsGameUser makes a command run as the account that plays.
+//
+// Only meaningful when this installer is root and installing for somebody
+// else, which is the cabinet case: ITGmania's own Linux installer requires
+// root and unpacks into /opt, so an operator setting a machine up is root and
+// the player is not. A helper started as root publishes a root-owned config
+// into the player's profile, which the helper that starts properly at the next
+// boot then cannot overwrite -- so the machine works until it is rebooted and
+// then quietly stops working.
+func runAsGameUser(cmd *exec.Cmd, u GameUser) {
+	if !isRoot() || u.Uid <= 0 {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Credential = &syscall.Credential{
+		Uid: uint32(u.Uid),
+		Gid: uint32(u.Gid),
+	}
+	// The helper resolves nothing from HOME, but anything it shells out to
+	// might, and a HOME of /root inside another account's session is a trap.
+	cmd.Env = append(os.Environ(), "HOME="+u.Home, "USER="+u.Name, "LOGNAME="+u.Name)
 }

@@ -78,6 +78,11 @@ func removeLegacy(modulesDir string) []string {
 // progress, if given, is called before each file with how many have been
 // written and how many there are, so a caller can draw a bar.
 func CopyModuleFiles(modulesDir string, files fs.FS, progress func(done, total int)) ([]string, error) {
+	return copyModuleFilesFor(modulesDir, files, progress, GameUser{})
+}
+
+// copyModuleFilesFor is CopyModuleFiles with an owner to hand the results to.
+func copyModuleFilesFor(modulesDir string, files fs.FS, progress func(done, total int), owner GameUser) ([]string, error) {
 	var names []string
 	if err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -118,6 +123,7 @@ func CopyModuleFiles(modulesDir string, files fs.FS, progress func(done, total i
 				return written, fmt.Errorf("creating %s: %w", dir, err)
 			}
 			chownLike(dir, modulesDir)
+			chownToGameUser(dir, owner)
 		}
 
 		mode := os.FileMode(0o644)
@@ -132,6 +138,7 @@ func CopyModuleFiles(modulesDir string, files fs.FS, progress func(done, total i
 		// runs as the player, through the helper -- cannot replace, so the
 		// browser would offer an update it could never finish.
 		chownLike(dest, modulesDir)
+		chownToGameUser(dest, owner)
 		written = append(written, rel)
 	}
 	if progress != nil {
@@ -163,12 +170,16 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 	if err := os.MkdirAll(res.ModulesDir, 0o755); err != nil {
 		return res, fmt.Errorf("creating %s: %w", res.ModulesDir, err)
 	}
-	// a Modules/ this run had to create belongs to the theme above it
+	// a Modules/ this run had to create belongs to the theme above it -- and
+	// then to the player, because replacing a file needs write permission on
+	// the directory holding it, and the in-game updater runs as them
 	chownLike(res.ModulesDir, themeDir)
+	chownToGameUser(res.ModulesDir, inst.GameUser)
 
 	res.Replaced = removeLegacy(res.ModulesDir)
+	res.Replaced = append(res.Replaced, removeNestedModules(res.ModulesDir)...)
 
-	written, err := CopyModuleFiles(res.ModulesDir, files, nil)
+	written, err := copyModuleFilesFor(res.ModulesDir, files, nil, inst.GameUser)
 	res.Written = written
 	if err != nil {
 		return res, err

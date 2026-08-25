@@ -59,10 +59,16 @@ func main() {
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
 		helperFlag    = flag.Bool("helper", false, "run the local service the in-game browser needs")
 		manifestFlag  = flag.String("manifest", "", "where the helper looks for update news (default: the published one)")
+		userFlag      = flag.String("user", "", "the account ITGmania runs as (default: work it out)")
 		verboseFlag   = flag.Bool("verbose", false, "list every file installed or removed")
 		checkFlag     = flag.Bool("check", false, "report whether the browser will actually work on this machine, and exit")
 	)
 	flag.Parse()
+
+	// Pinning the account has to happen before anything inspects an install,
+	// because the save profile, the helper location and the autostart
+	// registration all hang off it.
+	installer.ForceUser(*userFlag)
 
 	if *versionFlag {
 		fmt.Printf("%s-installer %s (%s/%s)\n", branding.Slug, version, runtime.GOOS, runtime.GOARCH)
@@ -250,6 +256,13 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		}
 	}
 	fmt.Printf("  Save:     %s\n", inst.SaveDir)
+	// Whose install this is, and why we think so. On a cabinet the installer
+	// is usually run with sudo by somebody who is not the player, and every
+	// path above belongs to the player -- so if this line names the wrong
+	// account, nothing else on screen can be trusted.
+	if inst.GameUser.Name != "" {
+		fmt.Printf("  For user: %s (%s)\n", inst.GameUser.Name, inst.GameUser.How)
+	}
 	if !inst.PrefsFound {
 		// Network access is a preference, so it lives in this file. Saying the
 		// file was not there is the difference between "it did not work" and

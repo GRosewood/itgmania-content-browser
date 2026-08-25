@@ -26,6 +26,13 @@ type Install struct {
 	// ThemeDir is the theme chosen for this run. Empty means "work it out",
 	// which is what everything except an explicit choice wants.
 	ThemeDir string
+
+	// GameUser is the account ITGmania runs as, when it could be worked out.
+	// Everything this installer writes belongs to them -- the save profile, the
+	// helper, the autostart registration -- so it is resolved once, on
+	// evidence, rather than inferred separately in each place from whatever
+	// HOME happened to be set to.
+	GameUser GameUser
 }
 
 // ModuleThemeDir returns the theme directory the installed module actually
@@ -277,6 +284,19 @@ func Inspect(root string) (Install, bool) {
 		// the marker is definitive; nothing else gets a say
 		inst.Portable = true
 		inst.SaveDir = localSave
+	} else if u, ok := ResolveGameUser(root); ok && saveUnderHome(u.Home) != "" {
+		// The account that actually plays decides where Save is. Guessing from
+		// the environment put it under /root when the installer was run with
+		// sudo, and everything downstream -- the allowlist, the theme in use,
+		// the helper -- followed it there.
+		inst.GameUser = u
+		inst.SaveDir = saveUnderHome(u.Home)
+		inst.PrefsFound = isFile(filepath.Join(inst.SaveDir, "Preferences.ini"))
+		// A portable install still wins: its Save sits beside the game and the
+		// game reads that one whoever runs it.
+		if isFile(filepath.Join(localSave, "Preferences.ini")) {
+			inst.SaveDir, inst.PrefsFound, inst.Portable = localSave, true, true
+		}
 	} else {
 		inst.SaveDir, inst.PrefsFound = pickSaveDir(localSave, saveDirCandidates(root))
 		inst.Portable = inst.SaveDir == localSave

@@ -131,6 +131,11 @@ func InstallHelperBinary(inst Install) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
 	}
+	// This directory lives inside the player's profile, and the helper writes
+	// its port and token into it every time it starts. Created by root it
+	// stayed root-owned, so the helper that starts at boot -- as the player --
+	// could not publish anything, and the game had no way to reach it.
+	chownToGameUser(filepath.Dir(dest), inst.GameUser)
 	data, err := os.ReadFile(self)
 	if err != nil {
 		return "", err
@@ -146,6 +151,10 @@ func InstallHelperBinary(inst Install) (string, error) {
 	if err := os.WriteFile(dest, data, 0o755); err != nil {
 		return "", fmt.Errorf("writing %s: %w", dest, err)
 	}
+	chownToGameUser(dest, inst.GameUser)
+	// A config left by a helper that ran as somebody else is unwritable to the
+	// one about to start, and stale besides.
+	_ = os.Remove(HelperConfigPath(inst))
 	return dest, nil
 }
 
@@ -185,6 +194,10 @@ func StartHelper(inst Install) error {
 	cmd := exec.Command(bin, helperArgs(inst)...)
 	cmd.Dir = HelperDir(inst)
 	detachProcess(cmd)
+	// Started as the player, not as root. A root helper writes root-owned
+	// files into their profile and holds the port the game will look for, so
+	// the first thing that starts correctly at boot cannot take over.
+	runAsGameUser(cmd, inst.GameUser)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -2,7 +2,10 @@
 
 package installer
 
-import "os"
+import (
+	"os"
+	"os/exec"
+)
 
 // Windows has neither the problem nor the mechanism.
 //
@@ -27,3 +30,11 @@ func candidateHomes(installRoot string) []string {
 
 // RunningAsAnother is always false: see above.
 func RunningAsAnother(path string) bool { return false }
+
+// Windows has one profile per logon, so there is no other account to hand
+// anything to.
+func chownToGameUser(string, GameUser) {}
+
+// Windows runs the installer and the game as the same logon, so there is no
+// other account to drop to.
+func runAsGameUser(*exec.Cmd, GameUser) {}

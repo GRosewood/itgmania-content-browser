@@ -153,6 +153,22 @@ Most problems are one of these:
 * **"Allowlist: NOT SET"** — re-run the installer **with ITGmania closed**. The
   game rewrites `Preferences.ini` from memory when it exits, so an edit made
   while it is running is thrown away.
+* **Find Content disappeared after updating ITGmania itself (Linux)** — re-run
+  this installer. ITGmania's Linux `setup.sh` preserves the theme's modules
+  across an upgrade with `cp -r -n "<old>/Modules" "<new>/Modules"`, and
+  because the new release already ships a `Modules` directory (Simply Love
+  keeps a README there) `cp` copies the folder *into* it rather than over it.
+  Everything ends up one level deeper, at `Modules/Modules/`. Simply Love lists
+  `Modules/` non-recursively and loads only names ending `.lua`, so nothing
+  there is ever read and the title-menu entry vanishes with no error anywhere.
+  Re-running puts the files back where they belong and removes the orphaned
+  copy. The same upgrade also re-copies them as root, so even where they do
+  still load, the in-game updater — which runs as the player — could no longer
+  replace them until the installer hands them back.
+
+  (Both only affect the stock `Simply Love` theme. That script names it
+  explicitly, so a fork such as `Simply Love-SM5` is left alone entirely and
+  its copy keeps working.)
 
 If the allowlist is the only thing missing — `Preferences.ini` was reset or
 replaced, but the helper is still installed — the manual scripts

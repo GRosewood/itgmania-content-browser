@@ -131,3 +131,35 @@ func RemovePack(inst Install, name string) (string, error) {
 	}
 	return dir, nil
 }
+
+// removeNestedModules cleans up the Modules/Modules/ directory an ITGmania
+// upgrade can leave behind on Linux.
+//
+// ITGmania's setup.sh preserves the theme's Modules folder across an upgrade
+// with `cp -r -n "<old>/Modules" "<new>/Modules"`. When the new release already
+// ships a Modules directory -- Simply Love does, it contains a README -- cp
+// copies the source INTO the destination rather than over it, so everything
+// ends up one level deeper at Modules/Modules/.
+//
+// Simply Love lists Modules/ with GetDirListing and loads only names ending
+// .lua, so nothing there is ever read: the entry disappears from the title menu
+// with no error anywhere. Re-running the installer lays the files down
+// correctly again, and this takes the orphaned copy away so it cannot be
+// mistaken for the real one later.
+//
+// Guarded on the nested copy actually being ours. A Modules/Modules that does
+// not hold our entry file belongs to somebody else.
+func removeNestedModules(modulesDir string) []string {
+	nested := filepath.Join(modulesDir, "Modules")
+	if !isDir(nested) {
+		return nil
+	}
+	if !isFile(filepath.Join(nested, "ITGmania Content Browser.lua")) {
+		return nil
+	}
+	if err := os.RemoveAll(nested); err != nil {
+		return nil
+	}
+	return []string{"Modules" + string(filepath.Separator) +
+		" (nested copy left by an ITGmania upgrade)"}
+}

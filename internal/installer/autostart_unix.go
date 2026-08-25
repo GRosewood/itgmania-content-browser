@@ -72,6 +72,11 @@ func launchAgentLabel(inst Install) string {
 // player's home (HelperDir follows SaveDir) while the unit that should start it
 // is written to root's, so nothing ever starts it and the browser never opens.
 func autostartHome(inst Install) string {
+	// The resolved account first: it was decided on evidence, and everything
+	// else here is inference from a path.
+	if inst.GameUser.Home != "" {
+		return inst.GameUser.Home
+	}
 	// Walk up the save path looking for the directory it hangs off. The test is
 	// saveUnderHome(dir) == SaveDir, so this cannot drift from the way discovery
 	// built that path in the first place, and it needs nothing to exist on disk
