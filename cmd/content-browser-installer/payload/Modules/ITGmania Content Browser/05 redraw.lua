@@ -20,10 +20,20 @@ local SMO_BASE          = CB.SMO_BASE
 local UP                = CB.UP
 local state             = CB.state
 
+-- Declared before Refresh because Refresh calls it: Lua binds a name when it
+-- compiles the line mentioning it, so a local declared further down is a
+-- different name to the code above -- a global, and a nil one.
+local DropMeasuredBanners
+
 local function Refresh()
 	-- A replaced module draws nothing. Its actors are about to be deleted, and
 	-- a request that lands in between would otherwise reach for them.
 	if state.retired then return end
+
+	-- Anything a previous pass found to be the wrong shape goes now, before a
+	-- single actor reads a list. Doing it here rather than at the moment of
+	-- measurement is what keeps a redraw out of the middle of a draw.
+	DropMeasuredBanners()
 
 	-- Worked out once per refresh rather than once per actor: four actors to a
 	-- row would otherwise each rebuild the same list, and their answers would
@@ -102,7 +112,22 @@ local function DropPackByBanner(url)
 	state.featWindow = math.floor(
 		Clamp(state.featCursor - 1, 0, math.max(0, FEAT.Count() - 1))
 		/ FEAT.VISIBLE) * FEAT.VISIBLE
-	Refresh()
+	return true
+end
+
+-- Deal with any banner that turned out to be the wrong shape.
+--
+-- Called at the top of a redraw, which is the only safe moment: the pruning
+-- moves rows out from under every actor that is about to read them, so doing
+-- it from inside an actor's own command left the rest of that command working
+-- from a list that had changed underneath it.
+DropMeasuredBanners = function()
+	local any = false
+	for url in pairs(state.bannerDrop) do
+		state.bannerDrop[url] = nil
+		if DropPackByBanner(url) then any = true end
+	end
+	return any
 end
 
 -- Record a banner's shape the first time its sprite loads. This is the only
@@ -116,7 +141,10 @@ local function MeasureBanner(sprite, url)
 	local aspect = w / h
 	state.bannerAspect[url] = aspect
 	if aspect < BANNER_MIN_ASPECT or aspect > BANNER_MAX_ASPECT then
-		DropPackByBanner(url)
+		-- written down, not acted on: this runs while an actor is drawing
+		-- itself, and pruning the lists there would pull rows out from under
+		-- the pass that is reading them
+		state.bannerDrop[url] = true
 	end
 end
 
@@ -127,6 +155,16 @@ end
 -- Raise (or restore) our position among ScreenSystemLayer's children.  The
 -- credits texts are drawn by that layer after the module container, so without
 -- this they sit on top of the browser.
+--
+-- A draw order is not a request to be drawn later; it is a number a frame sorts
+-- on when asked. An ActorFrame draws its children in the order it happens to
+-- hold them, and only SortByDrawOrder rebuilds that order from the numbers -- so
+-- setting the number and walking away, which is what this used to do, changed
+-- nothing at all. Each step therefore tells the PARENT to sort, because it is
+-- the parent that owns the list this node's number is being sorted in.
+--
+-- The sort is stable, so restoring to 0 puts everything back the way it was
+-- rather than merely somewhere else.
 local function LiftAboveSystemLayer(actor, lifted)
 	local node = actor
 	for _ = 1, 3 do
@@ -134,6 +172,7 @@ local function LiftAboveSystemLayer(actor, lifted)
 		pcall(function() node:draworder(lifted and 200 or 0) end)
 		local ok, parent = pcall(function() return node:GetParent() end)
 		if not ok then return end
+		if parent then pcall(function() parent:SortByDrawOrder() end) end
 		node = parent
 	end
 end

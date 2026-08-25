@@ -12,6 +12,7 @@ local CB = ...
 local AccentColor  = CB.AccentColor
 local BannerUrlFor = CB.BannerUrlFor
 local Clamp        = CB.Clamp
+local DetailInFlight = CB.DetailInFlight
 local LO           = CB.LO
 local state        = CB.state
 
@@ -98,11 +99,43 @@ local function Spinner(x, y, scale, visibleFn)
 	}
 end
 
+-- A wheel whose parent frame places it.
+--
+-- Spinner() above answers broadcasts itself, which is right while its position
+-- is fixed. It is wrong the moment that position depends on something another
+-- actor measures -- the width of a line of text just set, say -- because no two
+-- actors have a defined order when a broadcast is delivered. This one carries
+-- no commands at all, so it has no order to get wrong: the frame that owns the
+-- text sets it, measures it, and calls SpinnerSet below with the answer.
+local function SpinnerChild(name, scale)
+	return Def.Sprite{
+		Name    = name,
+		Texture = THEME:GetPathG("", "LoadingSpinner 10x3.png"),
+		Frames  = Sprite.LinearFrames(30, 1),
+		InitCommand = function(self) self:zoom(scale):visible(false) end,
+	}
+end
+
+-- Place and show a wheel made by SpinnerChild. The owning frame calls this.
+local function SpinnerSet(sprite, x, y, show)
+	if not sprite then return end
+	local on = state.open and show and true or false
+	sprite:visible(on)
+	if not on then return end
+	sprite:xy(x, y)
+	sprite:diffuse(AccentColor())
+end
+
 -- true while a pack banner is still on its way in
+--
+-- A banner inside its ten-minute failure cooldown is NOT on its way in, and a
+-- spinning wheel over an empty box says otherwise for the whole session. All
+-- three callers of this were making that promise.
 local function BannerPending(pack)
 	if not pack then return false end
 	local url = BannerUrlFor(pack)
-	if not url then return state.detailBusy[pack.id] == true end
+	if not url then return DetailInFlight(pack.id) end
+	if state.bannerFailed[url] then return false end
 	return state.banners[url] == nil
 end
 
@@ -163,3 +196,5 @@ CB.BannerPending = BannerPending
 CB.FitSprite     = FitSprite
 CB.ScrollBar     = ScrollBar
 CB.Spinner       = Spinner
+CB.SpinnerChild  = SpinnerChild
+CB.SpinnerSet    = SpinnerSet

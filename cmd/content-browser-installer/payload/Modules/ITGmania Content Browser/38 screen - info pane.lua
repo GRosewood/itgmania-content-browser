@@ -66,7 +66,7 @@ function CB.Screen.InfoPane()
 				FitSprite(self, LO.PANE_W - 40, 62)
 				self:diffuse(1, 1, 1, 1)
 				self:visible(true)
-			elseif url then
+			elseif url and not state.bannerFailed[url] then
 				self:visible(false)
 				RequestBanner(url)
 			elseif pack then
@@ -120,7 +120,10 @@ function CB.Screen.InfoPane()
 		end,
 		function(pack, det)
 			if det and det.author then return "charts by " .. det.author end
-			if state.detailBusy[pack.id] then return "loading details..." end
+			if LO.DetailPending(pack) then return "loading details..." end
+			-- the pane says the same thing the detail page says, rather than
+			-- falling silent and leaving a pack looking like it has no author
+			if LO.DetailLost(pack) then return "could not load details" end
 			return ""
 		end,
 		function(pack, det)

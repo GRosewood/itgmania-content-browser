@@ -17,7 +17,12 @@
 
 set -uo pipefail
 
-NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance"
+# Every host the browser reads. Both spellings of each: the engine's wildcard
+# does not match the bare domain -- "*.example.net" allows "www.example.net"
+# and refuses "example.net" -- so a list with only one of the two silently
+# half-works. itgdb.net was missing here for exactly that reason and took the
+# doubles-pack list with it.
+NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net"
 
 die() { printf '\n  %s\n\n' "$1" >&2; exit 1; }
 

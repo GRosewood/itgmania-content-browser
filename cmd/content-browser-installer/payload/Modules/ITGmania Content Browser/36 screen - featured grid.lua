@@ -100,99 +100,114 @@ function CB.Screen.FeaturedGrid(ui)
 				and (state.featWindow + slot) == state.featCursor
 		end
 		-- the size the banner is actually drawn at, so everything else can hug it.
-		-- Falls back to the whole card while the image is still on its way, which
-		-- is what the empty placeholder wants anyway.
-		local function CardArtSize()
-			local card = CardAt()
-			local pack = card and card.pack
-			local url  = pack and BannerUrlFor(pack)
-			local aspect = url and state.bannerAspect[url]
-			if not aspect or aspect <= 0 then
-				return LO.FEAT_CARD_W, LO.FEAT_CARD_H
-			end
-			if aspect >= LO.FEAT_CARD_W / LO.FEAT_CARD_H then
-				return LO.FEAT_CARD_W, LO.FEAT_CARD_W / aspect
-			end
-			return LO.FEAT_CARD_H * aspect, LO.FEAT_CARD_H
-		end
-
+		-- One command owns the art and everything sized to it.
+		--
+		-- The ring, the gradient and the wash all take their size from the
+		-- picture, and only the sprite can measure the picture. They used to
+		-- read it out of a shared table the sprite wrote -- which meant they
+		-- were reading whatever the LAST card had put there, because no two
+		-- actors have a defined order when a broadcast is delivered: the
+		-- engine serves each subscriber out of a set keyed on its own pointer,
+		-- and an ActorFrame does not hand the message down to its children.
+		-- Two of the three did not answer the banner-arrived message at all,
+		-- so nothing re-ran them when a picture finally landed.
+		--
+		-- So the frame does the whole job in one pass -- load, fit, measure,
+		-- then size the three quads from that measurement -- and its children
+		-- carry no commands, which is what makes their order stop mattering.
 		local card = Def.ActorFrame{
 			InitCommand = function(self) self:xy(cardX, cardY) end,
+			SMORefreshMessageCommand = function(self) self:playcommand("SMOCard") end,
+			SMOBannerReadyMessageCommand = function(self) self:playcommand("SMOCard") end,
+			SMOCardCommand = function(self)
+				local ring = self:GetChild("Ring")
+				local grad = self:GetChild("Gradient")
+				local art  = self:GetChild("Art")
+				local wash = self:GetChild("Wash")
 
-			-- focus ring, behind everything so it reads as a rim
-			Def.Quad{
+				local card = CardAt()
+				local pack = card and card.pack
+				local url  = pack and BannerUrlFor(pack)
+				local path = url and state.banners[url]
+				local key  = "feat" .. slot
+
+				-- the art first, because everything else is measured off it
+				if pack and path then
+					if loadedBanner[key] ~= path then
+						art:Load(path)
+						loadedBanner[key] = path
+					end
+					MeasureBanner(art, url)
+					FitSprite(art, LO.FEAT_CARD_W, LO.FEAT_CARD_H)
+					art:diffuse(1, 1, 1, 1)
+					art:visible(true)
+				elseif url and not state.bannerFailed[url] then
+					-- still on its way; the card has its own spinner
+					art:visible(false)
+					RequestBanner(url)
+				elseif pack then
+					LO.ShowNoBanner(art, key, loadedBanner,
+						LO.FEAT_CARD_W, LO.FEAT_CARD_H)
+				else
+					art:visible(false)
+				end
+
+				-- What the picture actually came out as. With nothing to show,
+				-- the whole card -- which is the shape the empty placeholder
+				-- wants anyway.
+				local w, h = LO.FEAT_CARD_W, LO.FEAT_CARD_H
+				if art:GetVisible() then
+					local aw, ah = art:GetZoomedWidth(), art:GetZoomedHeight()
+					if aw > 0 and ah > 0 then w, h = aw, ah end
+				end
+
+				local focused = CardFocused() and card ~= nil
+				ring:visible(focused)
+				ring:setsize(w + 4, h + 4)
+				ring:diffuse(AccentColor())
+
+				local pending = (card == nil)
+					and state.featured.status == "loading"
+					and (state.featWindow + slot) <= FEAT.TARGET
+				grad:visible(card ~= nil or pending)
+				grad:setsize(w, h)
+				if not card then
+					grad:diffusetopedge(color("#26262CF0"))
+					grad:diffusebottomedge(color("#131318F0"))
+				else
+					local accent = AccentColor()
+					if focused then
+						grad:diffusetopedge({accent[1]*0.85, accent[2]*0.85, accent[3]*0.85, 1})
+						grad:diffusebottomedge({accent[1]*0.22, accent[2]*0.22, accent[3]*0.22, 1})
+					else
+						grad:diffusetopedge({accent[1]*0.40, accent[2]*0.40, accent[3]*0.40, 1})
+						grad:diffusebottomedge({accent[1]*0.07, accent[2]*0.07, accent[3]*0.07, 1})
+					end
+				end
+
+				wash:visible(focused)
+				if focused then
+					local accent = AccentColor()
+					wash:setsize(w, h)
+					wash:diffusetopedge({accent[1], accent[2], accent[3], 0.42})
+					wash:diffusebottomedge({accent[1], accent[2], accent[3], 0.06})
+				end
+			end,
+
+			-- added in drawing order: rim, then the panel, then the picture
+			Def.Quad{ Name = "Ring",
 				InitCommand = function(self)
 					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2):visible(false)
 				end,
-				SMORefreshMessageCommand = function(self)
-					self:visible(CardFocused() and CardAt() ~= nil)
-					local w, h = CardArtSize()
-					self:setsize(w + 4, h + 4)
-					self:diffuse(AccentColor())
+			},
+			Def.Quad{ Name = "Gradient",
+				InitCommand = function(self)
+					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2):visible(false)
 				end,
 			},
-
-			-- the card itself: a vertical gradient rather than a flat panel, so
-			-- the art has something to sit on that is not just background
-			Def.Quad{
+			Def.Sprite{ Name = "Art",
 				InitCommand = function(self)
-					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2)
-				end,
-				SMORefreshMessageCommand = function(self)
-					local card = CardAt()
-					local pending = (card == nil)
-						and state.featured.status == "loading"
-						and (state.featWindow + slot) <= FEAT.TARGET
-					self:visible(card ~= nil or pending)
-					self:setsize(CardArtSize())
-					if not card then
-						self:diffusetopedge(color("#26262CF0"))
-						self:diffusebottomedge(color("#131318F0"))
-						return
-					end
-					local accent = AccentColor()
-					if CardFocused() then
-						self:diffusetopedge({accent[1]*0.85, accent[2]*0.85, accent[3]*0.85, 1})
-						self:diffusebottomedge({accent[1]*0.22, accent[2]*0.22, accent[3]*0.22, 1})
-					else
-						self:diffusetopedge({accent[1]*0.40, accent[2]*0.40, accent[3]*0.40, 1})
-						self:diffusebottomedge({accent[1]*0.07, accent[2]*0.07, accent[3]*0.07, 1})
-					end
-				end,
-			},
-
-			-- pack art, given as much of the card as it can take
-			Def.Sprite{
-				InitCommand = function(self)
-					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2)
-				end,
-				SMORefreshMessageCommand = function(self) self:playcommand("SMOSetBanner") end,
-				SMOBannerReadyMessageCommand = function(self) self:playcommand("SMOSetBanner") end,
-				SMOSetBannerCommand = function(self)
-					local card = CardAt()
-					local pack = card and card.pack
-					local url = pack and BannerUrlFor(pack)
-					local path = url and state.banners[url]
-					local key = "feat" .. slot
-					if pack and path then
-						if loadedBanner[key] ~= path then
-							self:Load(path)
-							loadedBanner[key] = path
-						end
-						MeasureBanner(self, url)
-						FitSprite(self, LO.FEAT_CARD_W, LO.FEAT_CARD_H)
-						self:diffuse(1, 1, 1, 1)
-						self:visible(true)
-					elseif url then
-						-- still on its way; the card has its own spinner
-						self:visible(false)
-						RequestBanner(url)
-					elseif pack then
-						LO.ShowNoBanner(self, key, loadedBanner,
-							LO.FEAT_CARD_W, LO.FEAT_CARD_H)
-					else
-						self:visible(false)
-					end
+					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2):visible(false)
 				end,
 			},
 
@@ -207,21 +222,11 @@ function CB.Screen.FeaturedGrid(ui)
 			end),
 
 			-- a wash of the accent colour over the art while it is highlighted,
-			-- strongest at the top so the card still reads bottom-lit
-			Def.Quad{
+			-- strongest at the top so the card still reads bottom-lit. Sized
+			-- and coloured by the frame's command above, like the rest.
+			Def.Quad{ Name = "Wash",
 				InitCommand = function(self)
 					self:xy(LO.FEAT_CARD_W/2, LO.FEAT_CARD_H/2):visible(false)
-				end,
-				SMORefreshMessageCommand = function(self)
-					if not (CardFocused() and CardAt()) then
-						self:visible(false)
-						return
-					end
-					local accent = AccentColor()
-					self:visible(true)
-					self:setsize(CardArtSize())
-					self:diffusetopedge({accent[1], accent[2], accent[3], 0.42})
-					self:diffusebottomedge({accent[1], accent[2], accent[3], 0.06})
 				end,
 			},
 		}

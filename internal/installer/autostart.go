@@ -3,7 +3,9 @@ package installer
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,12 +20,85 @@ func installKey(inst Install) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// Login registration for the loopback delete helper.
+// Getting the helper started, and being honest about when it will not.
 //
 // The helper has to be running while ITGmania is, because the game can only
-// reach it over HTTP and cannot start a process itself. Registering it as a
-// per-user login item is the least invasive way to guarantee that: no service,
-// no elevation, and it is removed again on uninstall.
+// reach it over HTTP and cannot start a process itself. Since the allowlist
+// shrank to 127.0.0.1 this stopped being a convenience: the helper is the
+// browser's only road to the internet, so a machine where it never starts has
+// a browser that does not open at all.
+//
+// Every mechanism here is per-user and needs no elevation. They differ in what
+// they need from the machine before they fire, and that difference is the whole
+// story on a cabinet -- so it is a value the installer can print rather than
+// something a reader has to infer.
+
+// StartsWhen says what a mechanism needs before it will run the helper. The
+// order is deliberate: later is better, and a cabinet operator only has to ask
+// whether their machine gets that far.
+type StartsWhen int
+
+const (
+	// StartsOnDesktopSession needs a full desktop -- a session manager that
+	// implements the XDG autostart spec, or Explorer as the Windows shell. A
+	// cabinet that boots into the game and nothing else never gets here.
+	StartsOnDesktopSession StartsWhen = iota
+	// StartsOnLogin needs somebody to log in, but nothing beyond that. An
+	// automatic logon counts, which is how most cabinets are set up.
+	StartsOnLogin
+	// StartsAtBoot needs no login at all.
+	StartsAtBoot
+)
+
+// Mechanism is how this install's helper is registered to start.
+type Mechanism string
+
+const (
+	MechNone    Mechanism = "none"
+	MechRunKey  Mechanism = "registry Run value"
+	MechTask    Mechanism = "scheduled task"
+	MechSystemd Mechanism = "systemd user service"
+	MechXDG     Mechanism = "XDG autostart entry"
+	MechAgent   Mechanism = "launch agent"
+)
+
+// AutostartStatus is what got registered and what it needs to fire.
+type AutostartStatus struct {
+	Mechanism Mechanism
+	Path      string
+	Starts    StartsWhen
+	// Upgradable means this machine supports a mechanism that needs less of it
+	// than the one currently registered -- an install made before that
+	// mechanism existed, or one whose registration fell back. It is the
+	// difference between "this is as good as it gets here", which is fine, and
+	// "re-run the installer", which is worth saying out loud.
+	//
+	// Needing a desktop session is NOT on its own a fault: on a desktop machine
+	// with no systemd an XDG entry is the right answer, and reporting that as a
+	// problem would be crying wolf at the very users this tool is asking to
+	// trust its reporting.
+	Upgradable bool
+	// Note is the one sentence worth telling an operator about this mechanism.
+	Note string
+}
+
+// Describe renders a status the way the installer prints it.
+func (s AutostartStatus) Describe() string {
+	if s.Mechanism == MechNone {
+		return "nothing is registered to start the helper"
+	}
+	when := "only once a desktop session starts"
+	switch s.Starts {
+	case StartsOnLogin:
+		when = "when this account logs in (automatic logon counts)"
+	case StartsAtBoot:
+		when = "at boot, with no login needed"
+	}
+	return string(s.Mechanism) + " at " + s.Path + "\n  starts " + when
+}
+
+// AutostartInfo reports what is registered for this install right now.
+func AutostartInfo(inst Install) AutostartStatus { return autostartInfo(inst) }
 
 // HelperDir is where the helper's copy of the binary and its published config
 // live for a given install. Keeping it beside Save/ makes it per-install and
@@ -167,11 +242,47 @@ func RemoveHelperBinary(inst Install) bool {
 	}
 }
 
-// RegisterAutostart makes the helper start with the user's session.
+// HelperInstalled reports whether this install has a helper binary at all.
+func HelperInstalled(inst Install) bool { return isFile(HelperBinary(inst)) }
+
+// HelperRunning asks the helper itself whether it is there.
+//
+// The config file existing is not the same question: it outlives a crash, and a
+// stale one is exactly the state that leaves a browser mysteriously dead. So
+// this does what the game does -- read the port and token the helper published,
+// and call /health over loopback.
+func HelperRunning(inst Install) bool {
+	raw, err := os.ReadFile(filepath.Join(HelperDir(inst), "helper.json"))
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		Port  int    `json:"port"`
+		Token string `json:"token"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil || cfg.Port <= 0 {
+		return false
+	}
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("X-Browser-Token", cfg.Token)
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusOK
+}
+
+// RegisterAutostart makes the helper start on its own from now on.
 func RegisterAutostart(inst Install) error { return registerAutostart(inst) }
 
-// UnregisterAutostart removes the login item again.
+// UnregisterAutostart removes whatever RegisterAutostart put in place --
+// including the mechanisms older versions used, which is why uninstall clears
+// more than it ever registers.
 func UnregisterAutostart(inst Install) error { return unregisterAutostart(inst) }
 
-// AutostartDescription names where this install's login item lives.
+// AutostartDescription names where this install's registration lives.
 func AutostartDescription(inst Install) string { return autostartDescription(inst) }

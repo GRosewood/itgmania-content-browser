@@ -416,7 +416,14 @@ local function LevelPool(bucket)
 	return pool
 end
 
-local LevelStep  -- forward declaration (recursive via callbacks)
+local LevelStep  -- forward declaration (re-entered via callbacks)
+
+-- The walk is re-entered from inside itself, and these are what make that
+-- flat rather than deep. See LevelStep at the bottom of this group for why.
+local levelStepping      = false   -- a walk is on the stack right now
+local levelStepAgain     = false   -- ...and something asked it for another lap
+local levelPublishWanted = false   -- a publish, held until the walking stops
+local levelRefreshWanted = false   -- a repaint, held the same way
 
 -- Another helping: called when somebody reaches the end of what has been
 -- gathered so far. Returns false when there is genuinely nothing more.
@@ -465,7 +472,23 @@ local function LevelPublish()
 	FetchPacks(state.page, true)
 end
 
-LevelStep = function()
+-- Publish the list, or note that it wants publishing.
+--
+-- Called once per placed row, and while the walk is running that can be a
+-- whole pool's worth in a single frame -- each one rebuilding the page and
+-- repainting the screen for a list nobody has seen yet. Held until the walking
+-- stops, it happens once, with every row that lap found already in it.
+local function LevelPublishSoon()
+	if levelStepping then levelPublishWanted = true return end
+	LevelPublish()
+end
+
+local function LevelRefreshSoon()
+	if levelStepping then levelRefreshWanted = true return end
+	Refresh()
+end
+
+local function LevelStepOnce()
 	local lv = state.level
 	if lv.status ~= "loading" then return end
 	-- nothing happens until the reader has actually stopped on this tab; see
@@ -590,9 +613,9 @@ LevelStep = function()
 						if state.level ~= lv then return end
 						lv.inFlight = lv.inFlight - 1
 						place(det)
-						LevelPublish()
+						LevelPublishSoon()
 						LevelStep()
-						Refresh()
+						LevelRefreshSoon()
 					end)
 				end
 			end
@@ -646,17 +669,17 @@ LevelStep = function()
 						-- verdict; the pack gets asked about again some other
 						-- time.
 						if det == nil then
-							LevelPublish()
+							LevelPublishSoon()
 							LevelStep()
-							Refresh()
+							LevelRefreshSoon()
 							return
 						end
 						local verdict = BeginnerPack(det)
 						LEVEL.Remember(pack, verdict)
 						if verdict then lv.rows[#lv.rows+1] = pack end
-						LevelPublish()
+						LevelPublishSoon()
 						LevelStep()
-						Refresh()
+						LevelRefreshSoon()
 					end)
 				end
 			end
@@ -669,7 +692,7 @@ LevelStep = function()
 	-- there invisible until some other pack's page happened to land.
 	if #lv.rows ~= (lv.published or 0) then
 		lv.published = #lv.rows
-		LevelPublish()
+		LevelPublishSoon()
 	end
 
 	-- the tagged pass finishing is not the end; the deep pass follows it
@@ -715,9 +738,40 @@ LevelStep = function()
 		-- the walk has stopped; put anything it decided on disk
 		if lv.bucket == "beginner" then LEVEL.SaveVerdicts() end
 		lv.status = "ready"
-		LevelPublish()
-		Refresh()
+		LevelPublishSoon()
+		LevelRefreshSoon()
 	end
+end
+
+-- Take a walk, and keep taking one while the walking asks for another.
+--
+-- Everything that used to recurse into the walk now lands here while a walk is
+-- already on the stack, and all that does is set a flag. The lap that is
+-- running finishes its own loop, and the repeat below starts the next one --
+-- same order of work, same forward progress, no stack.
+--
+-- The flag is cleared through a pcall so that an error inside the walk cannot
+-- leave levelStepping stuck true, which would silently wedge the tab: every
+-- later step would think a walk was already running and quietly decline.
+LevelStep = function()
+	if levelStepping then levelStepAgain = true return end
+
+	levelStepping = true
+	local ok, err = pcall(function()
+		repeat
+			levelStepAgain = false
+			LevelStepOnce()
+		until not levelStepAgain
+	end)
+	levelStepping = false
+
+	-- Whatever the whole walk decided, said once.
+	local publish, repaint = levelPublishWanted, levelRefreshWanted
+	levelPublishWanted, levelRefreshWanted = false, false
+	if publish then LevelPublish() end
+	if repaint then Refresh() end
+
+	if not ok then error(err, 0) end
 end
 
 -- Start the view the reader has actually settled on.

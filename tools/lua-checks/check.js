@@ -2,8 +2,8 @@
 //
 // The module used to be one file, and remembering to check one file is easy.
 // It is now an entry point and a folder of parts, and remembering to check
-// thirty is not -- so this walks the payload, runs all four checks on
-// everything it finds, and gives one answer.
+// forty is not -- so this walks the payload, runs every check on everything it
+// finds, and gives one answer.
 //
 // Usage:  node tools/lua-checks/check.js [payloadModulesDir]
 const { execFileSync } = require("child_process");
@@ -61,13 +61,14 @@ for (const file of files) {
     ["blocks  ", run("blocks.js", [file])],
     ["upvalues", run("upvalues.js", [file])],
     ["locals  ", run("locals.js", [file])],
+    ["order   ", run("order.js", [file])],
   ];
   const bad = results.filter(r => !r[1].ok);
   if (!bad.length) {
     // Pull the interesting numbers out so a passing run still says something.
     const up = /worst case (\d+) of 60/.exec(results[2][1].out);
     const lo = /^\s*(\d+) of 200/m.exec(results[3][1].out);
-    console.log("  ok    " + rel(file).padEnd(46) +
+    console.log("  ok    " + rel(file).padEnd(50) +
       "upvalues " + String(up ? up[1] : "?").padStart(2) + "/60" +
       "   locals " + String(lo ? lo[1] : "?").padStart(3) + "/200");
     continue;

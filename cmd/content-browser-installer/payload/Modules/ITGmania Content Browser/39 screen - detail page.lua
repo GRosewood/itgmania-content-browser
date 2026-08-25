@@ -25,6 +25,8 @@ local SONG_ROWS      = CB.SONG_ROWS
 local ScrollBar      = CB.ScrollBar
 local Snd            = CB.Snd
 local Spinner        = CB.Spinner
+local SpinnerChild   = CB.SpinnerChild
+local SpinnerSet     = CB.SpinnerSet
 local loadedBanner   = CB.loadedBanner
 local songArt        = CB.songArt
 local state          = CB.state
@@ -154,6 +156,7 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 		{ "Added", function(pack, det)
 			local date = FormatDate(pack.date)
 			if date == "" and det then date = det.date or "" end
+			if date == "" and LO.DetailLost(pack) then return "--" end
 			return date end,
 			-- the catalogue carries no date for the keyboard rows, so those
 			-- wait on the pack page like the rest
@@ -200,40 +203,49 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 		}
 
 		if row[2] then
-			-- captured so the spinner can sit after whatever the row managed
-			-- to say, rather than at a fixed place that would land on top of it
-			local valueText
-			detail[#detail+1] = Def.BitmapText{
-				Font = "Common Normal",
-				InitCommand = function(self)
-					valueText = self
-					self:horizalign(left):xy(TAB_VX, TabY(rowIndex)):zoom(0.5)
-					self:diffuse(0.86, 0.86, 0.86, 1)
-					self:maxwidth((TAB_W - (TAB_VX - TAB_X) - 4)/0.5)
-				end,
-				SMORefreshMessageCommand = function(self)
-					local pack = CurrentPack()
-					if not pack then self:settext("") return end
-					self:settext(row[2](pack, state.details[pack.id]) or "")
-				end,
-			}
+			-- The value and the wheel that waits beside it, in one command.
+			--
+			-- The wheel sits AFTER whatever the row managed to say, so it has
+			-- to know how wide that came out, and only the text can measure the
+			-- text. It used to ask the sibling for that width directly, which
+			-- meant it was reading whatever the LAST pack's line had come out
+			-- as: a broadcast reaches every actor separately, in no order this
+			-- code can rely on. So the frame sets the text, measures it, and
+			-- places the wheel from that measurement, all in the one pass.
+			local rowFrame = Def.ActorFrame{
+				SMORefreshMessageCommand = function(self) self:playcommand("SMORow") end,
+				SMOBannerReadyMessageCommand = function(self) self:playcommand("SMORow") end,
+				SMORowCommand = function(self)
+					local value = self:GetChild("Value")
+					local wheel = self:GetChild("Wheel")
+					local pack  = CurrentPack()
 
-			if row[3] then
-				-- After the text, not instead of it: a row that already says
-				-- something provisional keeps saying it while the better answer
-				-- is fetched.
-				detail[#detail+1] = Spinner(
-					function()
-						local wide = valueText and valueText:GetZoomedWidth() or 0
-						return TAB_VX + wide + (wide > 0 and 9 or 2)
+					value:settext(pack and (row[2](pack, state.details[pack.id]) or "") or "")
+
+					if not wheel then return end
+					-- After the text, not instead of it: a row that already says
+					-- something provisional keeps saying it while the better
+					-- answer is fetched.
+					local wide = value:GetZoomedWidth()
+					local waiting = LO.DetailShowing() and pack ~= nil
+						and row[3](pack, state.details[pack.id]) == true
+					SpinnerSet(wheel,
+						TAB_VX + wide + (wide > 0 and 9 or 2), TabY(rowIndex),
+						waiting)
+				end,
+
+				Def.BitmapText{
+					Name = "Value",
+					Font = "Common Normal",
+					InitCommand = function(self)
+						self:horizalign(left):xy(TAB_VX, TabY(rowIndex)):zoom(0.5)
+						self:diffuse(0.86, 0.86, 0.86, 1)
+						self:maxwidth((TAB_W - (TAB_VX - TAB_X) - 4)/0.5)
 					end,
-					TabY(rowIndex), 0.075,
-					function()
-						local pack = LO.DetailShowing() and CurrentPack() or nil
-						if not pack then return false end
-						return row[3](pack, state.details[pack.id]) == true
-					end)
-			end
+				},
+			}
+			if row[3] then rowFrame[#rowFrame+1] = SpinnerChild("Wheel", 0.075) end
+			detail[#detail+1] = rowFrame
 		end
 	end
 
@@ -245,56 +257,75 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 	-- offsets. A range is two numbers and a dash and should read as one thing;
 	-- spacing it for two digits left "7 - 12" with a hole either side of the
 	-- dash, and spacing it for one crowded "11 - 20".
-	local lowText, dashText
-	detail[#detail+1] = Def.BitmapText{
-		Font = "Common Normal",
-		InitCommand = function(self)
-			lowText = self
-			self:horizalign(left):xy(TAB_VX, TabY(4)):zoom(0.5)
-		end,
+	-- All three in one command, because the dash and the high number are
+	-- placed from how wide the LOW number came out, and only the low number
+	-- can measure itself. Asking it from a sibling laid the range out against
+	-- the previous pack's digits -- "7 - 12" spaced for two, "11 - 20" spaced
+	-- for one -- and left it that way, because redraw is event driven.
+	detail[#detail+1] = Def.ActorFrame{
 		SMORefreshMessageCommand = function(self)
-			local pack = CurrentPack()
-			local low = LO.PackSpan(pack and state.details[pack.id])
-			self:visible(low ~= nil)
-			if not low then return end
-			self:settext(tostring(low))
-			self:diffuse(MeterColor(low, 1))
-		end,
-	}
-	detail[#detail+1] = Def.BitmapText{
-		Font = "Common Normal",
-		Text = "-",
-		InitCommand = function(self)
-			dashText = self
-			self:horizalign(left):xy(TAB_VX + 14, TabY(4)):zoom(0.5)
-			self:diffuse(0.5, 0.5, 0.5, 1)
-		end,
-		SMORefreshMessageCommand = function(self)
+			local lowT  = self:GetChild("Low")
+			local dashT = self:GetChild("Dash")
+			local highT = self:GetChild("High")
+
 			local pack = CurrentPack()
 			local low, high = LO.PackSpan(pack and state.details[pack.id])
-			local show = low ~= nil and low ~= high
-			self:visible(show)
+
+			-- the low number first: the other two are placed from its width
+			if low == nil and pack and LO.DetailLost(pack) then
+				-- with nothing learned this row says so, like the others; the
+				-- dash and the high number stay hidden, so it reads as one dash
+				-- rather than as a range with holes in it
+				lowT:visible(true)
+				lowT:settext("--")
+				lowT:diffuse(0.55, 0.55, 0.55, 1)
+			elseif low then
+				lowT:visible(true)
+				lowT:settext(tostring(low))
+				lowT:diffuse(MeterColor(low, 1))
+			else
+				lowT:visible(false)
+			end
+
+			-- A range needs both ends. Either one alone is a number, and a
+			-- dash with nothing after it is not a range -- it is a loose dash.
+			local show = low ~= nil and high ~= nil and low ~= high
+			dashT:visible(show)
+			highT:visible(show)
 			if not show then return end
-			self:x(TAB_VX + (lowText and lowText:GetZoomedWidth() or 11) + 4)
+
+			local x = TAB_VX + lowT:GetZoomedWidth() + 4
+			dashT:x(x)
+			highT:x(x + dashT:GetZoomedWidth() + 4)
+			highT:settext(tostring(high))
+			highT:diffuse(MeterColor(high, 1))
 		end,
-	}
-	detail[#detail+1] = Def.BitmapText{
-		Font = "Common Normal",
-		InitCommand = function(self)
-			self:horizalign(left):xy(TAB_VX + 26, TabY(4)):zoom(0.5)
-		end,
-		SMORefreshMessageCommand = function(self)
-			local pack = CurrentPack()
-			local low, high = LO.PackSpan(pack and state.details[pack.id])
-			local show = high ~= nil and low ~= high
-			self:visible(show)
-			if not show then return end
-			local left = TAB_VX + (lowText and lowText:GetZoomedWidth() or 11) + 4
-			left = left + (dashText and dashText:GetZoomedWidth() or 4) + 4
-			self:x(left)
-			self:settext(tostring(high))
-			self:diffuse(MeterColor(high, 1))
-		end,
+
+		Def.BitmapText{
+			Name = "Low",
+			Font = "Common Normal",
+			InitCommand = function(self)
+				self:horizalign(left):xy(TAB_VX, TabY(4)):zoom(0.5)
+			end,
+		},
+		Def.BitmapText{
+			Name = "Dash",
+			Font = "Common Normal",
+			Text = "-",
+			InitCommand = function(self)
+				self:horizalign(left):xy(TAB_VX + 14, TabY(4)):zoom(0.5)
+				self:diffuse(0.5, 0.5, 0.5, 1)
+				self:visible(false)
+			end,
+		},
+		Def.BitmapText{
+			Name = "High",
+			Font = "Common Normal",
+			InitCommand = function(self)
+				self:horizalign(left):xy(TAB_VX + 26, TabY(4)):zoom(0.5)
+				self:visible(false)
+			end,
+		},
 	}
 
 	-- The difficulty span comes off the pack page like the chart count, so it
@@ -854,18 +885,27 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 		-- Art, its lit border and its dark backing, as ONE actor.
 		--
 		-- They were three siblings: the border and the backing read the size
-		-- the sprite had measured on some earlier pass. On the pass where an
-		-- image first arrived they ran BEFORE the sprite had measured it --
-		-- children answer a broadcast in the order they were added -- so they
-		-- sized themselves from the square fallback and a wide banner ended up
-		-- sitting on a green square. Redraw is event driven, so that square
-		-- then stayed until something unrelated asked for a refresh.
+		-- the sprite had measured on some earlier pass, so whenever an image
+		-- arrived before the sprite had measured it they sized themselves from
+		-- the square fallback, and a wide banner ended up sitting on a green
+		-- square that then stayed, because redraw is event driven.
+		--
+		-- And "before" was not even reliably "before": an ActorFrame does not
+		-- hand a broadcast down to its children (ActorFrame.cpp refuses to
+		-- propagate one), so every actor subscribes to MESSAGEMAN separately
+		-- and is served out of a set keyed on its own POINTER. Sibling handlers
+		-- therefore run in heap-address order -- no order at all, from here.
 		--
 		-- Now the parent does the whole job in one command: load, fit, measure,
 		-- then size the two quads from that measurement. The children have no
 		-- commands of their own, so the order they run in cannot matter. They
-		-- are still added border-backing-sprite, because that is the order they
-		-- are drawn in.
+		-- are still added border-backing-sprite, because that IS defined --
+		-- children draw in the order they were added, whatever order their
+		-- handlers would have run in.
+		--
+		-- The rule this is an instance of: whatever an actor measures, that
+		-- same actor publishes to everything that depends on it. Never leave a
+		-- measurement lying in a shared table for a sibling to pick up.
 		detail[#detail+1] = Def.ActorFrame{
 			InitCommand = function(self) self:xy(ART_X, ART_Y()) end,
 			SMORefreshMessageCommand = function(self) self:playcommand("SMOArt") end,
@@ -895,7 +935,7 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 					art:diffuse(1, 1, 1, 1)
 					art:visible(true)
 					w, h = art:GetZoomedWidth(), art:GetZoomedHeight()
-				elseif url then
+				elseif url and not state.bannerFailed[url] then
 					-- on its way in; the spinner below says so
 					art:visible(false)
 					RequestBanner(url)

@@ -215,7 +215,7 @@ function CB.Screen.DoublesView(ui)
 							FitSprite(self, 68, LO.ROW_H - 9)
 							self:diffuse(1, 1, 1, 1)
 							self:visible(true)
-						elseif url then
+						elseif url and not state.bannerFailed[url] then
 							self:visible(false)
 							RequestBanner(url)
 						elseif pack then

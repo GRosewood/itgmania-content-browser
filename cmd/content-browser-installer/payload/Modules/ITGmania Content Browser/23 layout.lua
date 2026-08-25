@@ -182,7 +182,10 @@ end
 function LO.DoublesBanner(pack)
 	if not (pack and state.open and state.settled and state.mode == "doubles") then return end
 	if pack.banner or state.details[pack.id] ~= nil then return end
-	if state.detailBusy[pack.id] or state.detailFailed[pack.id] then return end
+	-- FetchDetail already refuses a request that is in flight or lately
+	-- failed, and it is the only one of these that knows about the deadline
+	-- and the cooldown, so asking it is better than second-guessing it.
+	if DetailInFlight(pack.id) then return end
 	FetchDetail(pack, function() Refresh() end)
 end
 
@@ -404,6 +407,21 @@ end
 -- that was never made and a reply that never arrived, which is how a page
 -- ended up spinning at nothing for the rest of the session.
 function LO.DetailPending(pack)
+	if not (pack and pack.id) then return false end
+	if state.details[pack.id] ~= nil then return false end
+	return DetailInFlight(pack.id)
+end
+
+-- Is the detail page waiting on something that will change by itself?
+--
+-- Only while a request is genuinely in the air. Its deadline passes on a
+-- clock and this module repaints only when told to, so without something
+-- ticking the page would keep showing the picture it had when the request
+-- was sent -- spinners up, no dashes, no way out offered. Once the answer
+-- lands, or the deadline retires it, this goes false and the clock stops.
+function LO.DetailTicking()
+	if not LO.DetailShowing() then return false end
+	local pack = CurrentPack()
 	if not (pack and pack.id) then return false end
 	if state.details[pack.id] ~= nil then return false end
 	return DetailInFlight(pack.id)

@@ -219,11 +219,17 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 	modulesDir := filepath.Join(inst.ModuleThemeDir(), "Modules")
 	removed := removeLegacy(modulesDir)
 
-	// Take the login item out first, then signal the running helper to exit by
-	// removing the config file it polls for.
-	where := AutostartDescription(inst)
-	if err := UnregisterAutostart(inst); err == nil {
-		removed = append(removed, "login item ("+where+")")
+	// Take the autostart registration out first, then signal the running helper
+	// to exit by removing the config file it polls for.
+	//
+	// What was actually there is asked BEFORE clearing it, and reported only if
+	// there was something: unregisterAutostart returns nil whether or not it
+	// found anything, so reporting on its error alone claimed to have removed a
+	// registration that never existed -- and named a path computed from the
+	// platform rather than from the machine.
+	was := autostartInfo(inst)
+	if err := UnregisterAutostart(inst); err == nil && was.Mechanism != MechNone {
+		removed = append(removed, string(was.Mechanism)+" ("+was.Path+")")
 	}
 	// StopHelper waits for the process to let go of its executable, so the
 	// delete below actually succeeds on Windows instead of silently failing.

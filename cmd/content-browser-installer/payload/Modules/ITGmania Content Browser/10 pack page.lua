@@ -13,6 +13,7 @@ local ParsePackDetail = CB.ParsePackDetail
 local Refresh         = CB.Refresh
 local SMO_BASE        = CB.SMO_BASE
 local UrlAllowed      = CB.UrlAllowed
+local refs            = CB.refs
 local state           = CB.state
 
 -- Upstream lives in the library part, which loads after this one, so it is
@@ -72,19 +73,40 @@ local function FetchDetail(pack, cb, force)
 		return
 	end
 
+	-- Past the deadline the old request is disowned but not cancelled -- the
+	-- engine gives no handle to cancel one -- so it may still reply, late,
+	-- after this replacement has been sent. The generation is what tells them
+	-- apart: only the newest may clear the flags or record a verdict, or the
+	-- straggler would retire a request that is still genuinely in the air.
+	state.detailGen[pack.id] = (state.detailGen[pack.id] or 0) + 1
+	local generation = state.detailGen[pack.id]
 	state.detailBusy[pack.id] = true
 	state.detailAt[pack.id] = GetTimeSinceStart()
+	-- Something has to watch the deadline: it moves on a clock, and this
+	-- module only repaints when told to. The heartbeat is that clock, and it
+	-- stops itself the moment nothing is waiting on one.
+	if refs.heart then refs.heart:playcommand("SMOArmHeartbeat") end
 	NETWORK:HttpRequest{
 		url = Upstream(SMO_BASE .. "/pack/" .. pack.id),
 		connectTimeout = 10,
 		transferTimeout = 30,
 		onResponse = function(response)
+			if state.detailGen[pack.id] ~= generation then
+				-- a straggler from a request this one replaced
+				if cb then cb(state.details[pack.id]) end
+				return
+			end
 			state.detailBusy[pack.id] = nil
 			state.detailAt[pack.id] = nil
 			local det = nil
 			if response.error == nil and response.statusCode == 200 then
 				local ok, parsed = pcall(ParsePackDetail, response.body)
-				if ok and parsed then
+				-- A page that yielded neither a song nor a chart count is not
+				-- a pack with no songs -- it is a page that was not the page:
+				-- an error body, a redirect, markup that moved. Filing that as
+				-- a success cached the emptiness for the session and left the
+				-- header reading "Songs 1 of 0" with no way to ask again.
+				if ok and parsed and (#parsed.songs > 0 or parsed.stats.charts) then
 					state.details[pack.id] = parsed
 					state.detailFailed[pack.id] = nil
 					det = parsed

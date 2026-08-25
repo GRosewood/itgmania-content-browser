@@ -57,8 +57,9 @@ func main() {
 		versionFlag   = flag.Bool("version", false, "print version and exit")
 		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
-		helperFlag    = flag.Bool("helper", false, "run the loopback service the in-game browser uses to delete packs")
+		helperFlag    = flag.Bool("helper", false, "run the local service the in-game browser needs")
 		manifestFlag  = flag.String("manifest", "", "where the helper looks for update news (default: the published one)")
+		checkFlag     = flag.Bool("check", false, "report whether the browser will actually work on this machine, and exit")
 	)
 	flag.Parse()
 
@@ -86,6 +87,14 @@ func main() {
 	// chrome and never prompts.
 	if *helperFlag {
 		os.Exit(runHelper(*targetFlag, *manifestFlag))
+	}
+
+	// -check changes nothing. It exists because the two ways this goes wrong on
+	// a cabinet -- the allowlist and whether anything will start the helper --
+	// are both invisible from inside the game, which can only report that it
+	// cannot reach the network.
+	if *checkFlag {
+		os.Exit(runCheck(*targetFlag))
 	}
 
 	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag,
@@ -308,15 +317,21 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		fmt.Println("  Network access: already enabled")
 	}
 
+	// The helper is not a nicety any more. With 127.0.0.1 as the only entry on
+	// the allowlist it is the browser's only road to the internet, so "the
+	// browser still works, only deletion is off" stopped being true when the
+	// relay landed. Say what is actually at stake, and say plainly when the
+	// thing meant to start it will not.
 	switch {
 	case res.Helper.Err != nil:
-		fmt.Printf("  Pack removal:   unavailable (%v)\n", res.Helper.Err)
-		fmt.Println("    The browser still works; only in-game pack deletion is off.")
+		fmt.Printf("  Local helper:   FAILED (%v)\n", res.Helper.Err)
+		fmt.Println("    The browser reaches the internet through it, so it will not open.")
 	case res.Helper.Running:
-		fmt.Println("  Pack removal:   enabled (local helper running, starts with your session)")
+		fmt.Println("  Local helper:   running")
 	default:
-		fmt.Println("  Pack removal:   set up, but the helper is not running yet")
+		fmt.Println("  Local helper:   installed, but not running yet")
 	}
+	printAutostart(installer.AutostartInfo(inst))
 
 	if !installer.AllowlistSatisfied(inst.SaveDir) {
 		fmt.Println()
@@ -328,6 +343,126 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	fmt.Println()
 	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, above Exit.\n", branding.MenuLabel)
 	return 0
+}
+
+// printAutostart says what will start the helper next time, and -- the part
+// that matters on a cabinet -- what that mechanism needs before it fires.
+func printAutostart(s installer.AutostartStatus) {
+	if s.Mechanism == installer.MechNone {
+		fmt.Println("    WARNING: nothing is registered to start it again, so it will")
+		fmt.Println("    stop working when this machine restarts.")
+		return
+	}
+	fmt.Printf("    starts via a %s\n", s.Mechanism)
+	fmt.Printf("      %s\n", s.Path)
+	switch s.Starts {
+	case installer.StartsAtBoot:
+		fmt.Println("      at boot -- no login needed")
+	case installer.StartsOnLogin:
+		fmt.Println("      when this account logs in (automatic logon counts)")
+	default:
+		fmt.Println("      only once a DESKTOP session starts, so a cabinet that boots")
+		fmt.Println("      straight into the game will not start it")
+	}
+	for _, line := range wrap(s.Note, 66) {
+		fmt.Println("      " + line)
+	}
+}
+
+// wrap breaks a sentence at word boundaries so a note reads as prose in the
+// terminal rather than running off the edge of a narrow console.
+func wrap(s string, width int) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		if line == "" {
+			line = word
+			continue
+		}
+		if len(line)+1+len(word) > width {
+			out = append(out, line)
+			line = word
+			continue
+		}
+		line += " " + word
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
+}
+
+// runCheck reports whether this machine can actually run the browser, without
+// changing anything.
+func runCheck(target string) int {
+	inst, ok := pickForCheck(target)
+	if !ok {
+		fmt.Println("  No ITGmania installation found.")
+		fmt.Println("  Point at one with -install-dir <path>.")
+		return 1
+	}
+
+	fmt.Println()
+	fmt.Println("  " + branding.Name + " -- checking " + inst.Root)
+	fmt.Println()
+
+	problems := 0
+
+	if installer.AllowlistSatisfied(inst.SaveDir) {
+		fmt.Println("  Allowlist:      ok (127.0.0.1 is allowed)")
+	} else {
+		problems++
+		fmt.Println("  Allowlist:      NOT SET")
+		fmt.Printf("    HttpEnabled/HttpAllowHosts in %s\n",
+			filepath.Join(inst.SaveDir, "Preferences.ini"))
+		fmt.Println("    Re-run this installer with ITGmania closed.")
+	}
+
+	switch {
+	case !installer.HelperInstalled(inst):
+		problems++
+		fmt.Println("  Local helper:   NOT INSTALLED")
+		fmt.Println("    Re-run this installer.")
+	case installer.HelperRunning(inst):
+		fmt.Println("  Local helper:   running")
+	default:
+		problems++
+		fmt.Println("  Local helper:   installed, but NOT RUNNING right now")
+		fmt.Println("    The browser will not open until it is.")
+	}
+
+	// Nothing registered is always wrong. Needing a desktop session is only
+	// wrong when this machine could do better -- on a plain desktop with no
+	// systemd it is the right answer, and failing there would be crying wolf.
+	status := installer.AutostartInfo(inst)
+	printAutostart(status)
+	if status.Mechanism == installer.MechNone || status.Upgradable {
+		problems++
+	}
+
+	fmt.Println()
+	if problems == 0 {
+		fmt.Println("  Everything the browser needs is in place.")
+		return 0
+	}
+	fmt.Printf("  %d thing(s) above need attention.\n", problems)
+	return 1
+}
+
+// pickForCheck resolves an install without prompting: -check is meant to be
+// runnable from a cabinet's startup script.
+func pickForCheck(target string) (installer.Install, bool) {
+	if target != "" {
+		return installer.Inspect(target)
+	}
+	installs := installer.Discover()
+	if len(installs) == 0 {
+		return installer.Install{}, false
+	}
+	return installs[0], true
 }
 
 func describe(inst installer.Install) string {

@@ -29,7 +29,7 @@ On macOS and Linux you may need `chmod +x` first, and macOS marks downloads as
 quarantined — right-click → Open, or
 `xattr -d com.apple.quarantine <file>`.
 
-Then start ITGmania: **Find Content** is on the title menu, below Exit.
+Then start ITGmania: **Find Content** is on the title menu, above Exit.
 
 ### Console installer
 
@@ -41,41 +41,57 @@ itgmania-content-browser-installer [flags]
 
   -install-dir <path>   ITGmania install directory (default: auto-detect)
   -list                 list detected installations and exit
+  -list-themes          list this install's themes and whether the module runs under them
+  -theme <name>         theme folder to install into (default: the one in use)
   -detect               print the best-guess install directory (for front-ends)
+  -check                report whether the browser will work here, and exit
   -y                    don't prompt; use the first detected install
   -uninstall            remove the module files
-  -helper               run the loopback service the in-game browser deletes packs with
+  -helper               run the local service the in-game browser needs
+  -manifest <url>       where the helper looks for update news
   -no-banner            don't draw the artwork banner
   -version              print version and exit
 ```
 
-### How in-game pack deletion works
+`-check` is the one to reach for on a cabinet: it changes nothing, prints what
+is and is not in place, and exits non-zero when something needs attention.
 
-The module's **Installed Packs** tab deletes packs outright, without the player
-leaving the game. It cannot do that on its own: ITGmania's Lua file manager
-exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`, `GetHashForFile`,
-`GetDirListing` and `Unzip`, and no delete, move or rename exists anywhere in
-the Lua API.
+### The local helper
 
-What Lua *can* do is issue an HTTP request, and `NetworkManager::IsUrlAllowed`
-matches on host only — the port is not part of the check. So the installer adds
-`127.0.0.1` to `HttpAllowHosts` and registers a per-user login item that runs
-this same binary with `-helper`. That service:
+The browser talks to a small service on loopback. On a fresh install it is the
+browser's **only** route to the internet, so it is worth understanding before
+you put this on a cabinet.
+
+ITGmania does not let a theme reach the network on its own, and its Lua file
+manager exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`,
+`GetHashForFile`, `GetDirListing` and `Unzip` — no delete, move or rename exists
+anywhere in the Lua API. What Lua *can* do is issue an HTTP request, and
+`NetworkManager::IsUrlAllowed` matches on host only, ignoring the port. So the
+installer adds `127.0.0.1` to `HttpAllowHosts`, copies itself to
+`<SaveDir>/ITGmaniaContentBrowser/content-browser-helper` (about 10 MB) and
+registers that copy to start with the user's session, running with `-helper`.
+
+That service:
 
 * binds **127.0.0.1 on an OS-assigned port** and nothing else;
 * generates a fresh token per run and publishes `{port, token}` to
   `Save/ITGmaniaContentBrowser/helper.json` with mode 0600;
 * rejects any request that is not loopback and does not carry the token
-  (compared in constant time);
-* accepts only `GET /health` and `POST /remove`;
-* resolves the pack name through the same guard the tests cover — it must be a
-  plain folder name that lands directly inside a `Songs/` directory, so
+  (compared in constant time) — every route, without exception;
+* **relays the browser's reads** to stepmaniaonline.net, arrowcloud.dance and
+  itgdb.net, and refuses any other host, redirects included. It is not an open
+  proxy;
+* serves pack deletion, audio previews, pack installs, `Pack.ini`, chart
+  credits, free space and the in-game updater;
+* resolves a pack name through the same guard the tests cover — it must be a
+  plain folder name landing directly inside a `Songs/` directory, so
   `../Program` and friends are refused rather than acted on;
 * exits when its config file disappears or names another process, which is how
   uninstall stops it and how an upgrade replaces it.
 
-No elevation, no system service, and `-uninstall` removes the login item, the
-binary and the config.
+No elevation and no system service on any platform, and `-uninstall` removes the
+registration, the binary and the config. (The one root command in this project
+is optional and appears only under [Headless cabinets](#headless-cabinets).)
 
 ## What the installer does
 
@@ -94,9 +110,10 @@ binary and the config.
   directly and skips the hop.)
 
 The preferences edit keeps every host already on your allowlist (GrooveStats
-keeps working), changes exactly one line, preserves CRLF endings, writes a
-timestamped `.bak` next to the file, and writes atomically so an interrupted
-run cannot corrupt it. Running it twice is harmless.
+keeps working), changes at most two lines — `HttpAllowHosts` and `HttpEnabled` —
+and adds them, or a whole `[Options]` section, if they are missing. It preserves
+CRLF endings, writes a timestamped `.bak` next to the file, and writes atomically
+so an interrupted run cannot corrupt it. Running it twice is harmless.
 
 ### Why the allowlist step is needed
 
@@ -114,15 +131,36 @@ warning naming the exact problem and how to fix it.
 
 ## If something goes wrong
 
-Run the installer again. Or, with ITGmania closed, run
-`Enable Network Access.bat` (Windows) / `enable-network-access.sh`
-(macOS/Linux) from `Themes/Simply Love/Modules/` — both are plain text and
-safe to read first. To do it by hand, add this to the `HttpAllowHosts` line in
-`Save/Preferences.ini`:
+Ask the installer. It reports the two things that can be wrong and changes
+nothing:
 
+```bash
+itgmania-content-browser-installer -check
 ```
-stepmaniaonline.net,*.stepmaniaonline.net
-```
+
+It prints whether `127.0.0.1` is on the allowlist, whether the helper is
+answering right now, and — the one that catches cabinets — **what is registered
+to start the helper and what that needs before it fires**. It exits non-zero
+when something needs attention, so a cabinet's startup script can run it.
+
+Most problems are one of these:
+
+* **"Local helper: NOT RUNNING"** — the browser reaches the internet through
+  it, so the browser will not open at all. Re-run the installer.
+* **"starts only once a DESKTOP session starts"** — the machine boots straight
+  into the game, so nothing ever runs the helper. See
+  [Headless cabinets](#headless-cabinets).
+* **"Allowlist: NOT SET"** — re-run the installer **with ITGmania closed**. The
+  game rewrites `Preferences.ini` from memory when it exits, so an edit made
+  while it is running is thrown away.
+
+If you would rather not use the installer at all, the manual scripts
+`Enable Network Access.bat` (Windows) and `enable-network-access.sh`
+(macOS/Linux) in `Themes/Simply Love/Modules/` allowlist the catalogue hosts
+directly, which lets the browser work **without a helper** — browsing and
+downloads only, no pack deletion, previews, credits or in-game updates. Both
+are plain text and safe to read first. This is the fallback for a hand-copied
+install; on a cabinet, fix the helper instead — see below.
 
 ## Requirements
 
@@ -219,15 +257,51 @@ update path is tested without publishing anything.
 
 ### Headless cabinets
 
-The helper starts from a per-user login item (XDG autostart on Linux), so a
-cabinet that boots straight into the game with no desktop session never
-starts it -- and since a fresh install allowlists only `127.0.0.1` and
-relies on the helper to relay the catalogue hosts, the browser is dead there.
-Two ways out: start the helper from whatever starts the game (`content-browser-helper -helper`
-beside the game's own launch script), or run the Enable Network Access script
-once, which allowlists the catalogue hosts directly and lets the browser work
-without the helper (browsing and engine downloads; no deletes, previews or
-credits).
+A fresh install allowlists only `127.0.0.1`, so the helper is not a nicety on a
+cabinet — it is the browser's only route to the internet. If nothing starts it,
+the browser does not open at all.
+
+Run `-check` on the cabinet; it names the mechanism and says what that mechanism
+needs. What gets registered:
+
+| Platform | Mechanism | Starts |
+|---|---|---|
+| **Windows** | per-user scheduled task, logon-triggered | on logon — **automatic logon counts** |
+| **Linux** (systemd) | systemd **user** service, `WantedBy=default.target` | on any login session, desktop or not |
+| **Linux** (no systemd) | XDG autostart entry | only with a desktop session |
+| **macOS** | LaunchAgent | on login — automatic login counts |
+
+None of these need elevation, and the installer never asks for any.
+
+The two that used to fail are fixed. Windows was a registry `Run` value, which
+Explorer dispatches — so a cabinet that replaces the shell with the game never
+ran it; a scheduled task is dispatched by the Task Scheduler service instead and
+does not care what the shell is. Linux was an XDG autostart entry, which the
+*desktop session* runs — so a machine that boots to a getty, logs in
+automatically and starts the game from a script had nothing that read it; a
+systemd user service is started by logind for any session at all. Re-running the
+installer migrates an existing install to the new mechanism.
+
+**A cabinet with no login session whatsoever** is the one case left. A systemd
+user service still needs a user instance, and logind only starts one for a
+login. One command fixes it permanently, and it is the only step here that needs
+root:
+
+```bash
+sudo loginctl enable-linger <the account the game runs as>
+```
+
+After that the helper starts at boot with nobody logged in, and `-check` will
+say `at boot -- no login needed`.
+
+If you would rather not use linger, start the helper from whatever starts the
+game. Pass the install directory — without it the helper guesses, and on a
+machine with two installs it can publish its config where the running game never
+looks:
+
+```bash
+"<SaveDir>/ITGmaniaContentBrowser/content-browser-helper" -helper -install-dir "<install root>" &
+```
 
 ## Layout
 
@@ -246,7 +320,9 @@ internal/
   branding/                      product name, author, slug, version
   helper/                        loopback delete service (+ tests)
   installer/                     discovery, Preferences.ini merge, copy,
-                                 pack removal, login item (+ tests)
+                                 pack removal, autostart registration
+                                 (scheduled task / systemd user unit /
+                                 launch agent) (+ tests)
   update/                        version check and in-game update (+ tests)
 packaging/
   windows/setup.iss              Inno Setup wizard + generated wizard bitmaps

@@ -41,7 +41,8 @@ function CB.Screen.HiddenHelpers(af)
 			-- when something happens -- so without a clock the first answer
 			-- from the helper would also be the last, and the dialog would sit
 			-- on "Downloading..." through an update that had already finished.
-			if state.open and (DownloadsActive() or UP.Busy()) then
+			if state.open and (DownloadsActive() or UP.Busy()
+			   or LO.DetailTicking()) then
 				Refresh()
 				self:sleep(0.2):queuecommand("SMOHeartbeat")
 			end

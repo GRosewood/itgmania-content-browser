@@ -109,8 +109,9 @@ function CB.Screen.Dialogs(af, ui)
 		if choicesFn then
 			-- An icon shifts its label sideways to keep the pair centred in the
 			-- box, and the icon then hangs off the label's measured width --
-			-- which is why the label is kept, rather than positioned blind.
-			local choiceLabel = {}
+			-- which is why the row frame below sets the label and places the
+			-- icon itself, in one pass, rather than leaving the width in a
+			-- table for the icon to pick up whenever its turn happens to come.
 			local ICON_W, ICON_GAP = 13, 5
 			local COUNT = slots or 2
 			local BOX_GAP = 8
@@ -121,12 +122,6 @@ function CB.Screen.Dialogs(af, ui)
 			for ci = 1, COUNT do
 				local cx = -ROW_W/2 + BOX_W/2 + (ci-1)*(BOX_W + BOX_GAP)
 				local cy = 0   -- everything below sits inside the row frame
-
-				-- the row itself, positioned once on behalf of all its parts
-				local slot = Def.ActorFrame{
-					InitCommand = function(self) self:y(h/2 - 48) end,
-					SMORefreshMessageCommand = function(self) self:y(ChoiceY()) end,
-				}
 
 				-- which icon this slot carries, if the file is actually there
 				local iconName = nil
@@ -151,6 +146,52 @@ function CB.Screen.Dialogs(af, ui)
 					return on[ci] ~= nil
 				end
 
+				-- The row itself, positioned once on behalf of all its parts --
+				-- and the one place the label and the icon are dealt with,
+				-- because the icon is placed from how wide the label came out
+				-- and only the label can measure the label. Written below
+				-- IconOn on purpose: a closure compiled above a local binds
+				-- that name to a global instead, and a global nobody sets is nil.
+				local slot = Def.ActorFrame{
+					InitCommand = function(self) self:y(h/2 - 48) end,
+					SMORefreshMessageCommand = function(self)
+						self:y(ChoiceY())
+
+						local label = self:GetChild("Label")
+						local icon  = self:GetChild("Icon")
+						local list, idx = choicesFn()
+						local live = list ~= nil and list[ci] ~= nil
+
+						-- the label first: the icon is placed from its width
+						label:visible(live)
+						if live then
+							label:settext(list[ci])
+							if not radio then
+								label:x(cx + (IconOn() and shift or 0))
+							end
+							if idx == ci then
+								label:diffuse(1, 1, 1, 1)
+							else
+								label:diffuse(0.65, 0.65, 0.65, 1)
+							end
+						end
+
+						if icon then
+							local on = live and IconOn()
+							icon:visible(on and true or false)
+							if on then
+								local w = label:GetZoomedWidth()
+								icon:x(cx + shift - w/2 - ICON_GAP - ICON_W/2)
+								if idx == ci then
+									icon:diffuse(1, 1, 1, 1)
+								else
+									icon:diffuse(0.65, 0.65, 0.65, 1)
+								end
+							end
+						end
+					end,
+				}
+
 				slot[#slot+1] = Def.Quad{
 					InitCommand = function(self)
 						self:xy(cx, cy):setsize(BOX_W, 26)
@@ -167,9 +208,9 @@ function CB.Screen.Dialogs(af, ui)
 					end,
 				}
 				slot[#slot+1] = Def.BitmapText{
+					Name = "Label",
 					Font = "Common Normal",
 					InitCommand = function(self)
-						choiceLabel[ci] = self
 						self:zoom(0.5)
 						if radio then
 							self:horizalign(left):xy(cx + TEXT_X, cy)
@@ -178,20 +219,7 @@ function CB.Screen.Dialogs(af, ui)
 							self:xy(cx, cy)
 							self:maxwidth((BOX_W - 8 - shift*2)/0.5)
 						end
-					end,
-					SMORefreshMessageCommand = function(self)
-						local list, idx = choicesFn()
-						self:visible(list ~= nil and list[ci] ~= nil)
-						if not (list and list[ci]) then return end
-						self:settext(list[ci])
-						if not radio then
-							self:x(cx + (IconOn() and shift or 0))
-						end
-						if idx == ci then
-							self:diffuse(1, 1, 1, 1)
-						else
-							self:diffuse(0.65, 0.65, 0.65, 1)
-						end
+						self:visible(false)
 					end,
 				}
 
@@ -227,23 +255,11 @@ function CB.Screen.Dialogs(af, ui)
 
 				if iconName then
 					slot[#slot+1] = Def.Sprite{
+						Name = "Icon",
 						Texture = iconName,
 						InitCommand = function(self)
 							-- drawn at 96px, shown at 13, like the tab icons
 							self:xy(cx, cy):zoom(ICON_W/96):visible(false)
-						end,
-						SMORefreshMessageCommand = function(self)
-							self:visible(IconOn())
-							if not IconOn() then return end
-							local _, idx = choicesFn()
-							local label = choiceLabel[ci]
-							local w = label and label:GetZoomedWidth() or 0
-							self:x(cx + shift - w/2 - ICON_GAP - ICON_W/2)
-							if idx == ci then
-								self:diffuse(1, 1, 1, 1)
-							else
-								self:diffuse(0.65, 0.65, 0.65, 1)
-							end
 						end,
 					}
 				end
