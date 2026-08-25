@@ -153,13 +153,17 @@ Most problems are one of these:
   game rewrites `Preferences.ini` from memory when it exits, so an edit made
   while it is running is thrown away.
 
-If you would rather not use the installer at all, the manual scripts
+If the allowlist is the only thing missing — `Preferences.ini` was reset or
+replaced, but the helper is still installed — the manual scripts
 `Enable Network Access.bat` (Windows) and `enable-network-access.sh`
-(macOS/Linux) in `Themes/Simply Love/Modules/` allowlist the catalogue hosts
-directly, which lets the browser work **without a helper** — browsing and
-downloads only, no pack deletion, previews, credits or in-game updates. Both
-are plain text and safe to read first. This is the fallback for a hand-copied
-install; on a cabinet, fix the helper instead — see below.
+(macOS/Linux) in `Themes/Simply Love/Modules/` put it back without re-running
+the installer. They add `127.0.0.1` and set `HttpEnabled=1`, exactly what the
+installer writes, and never remove a host you already had. Both are plain text
+and safe to read first.
+
+They do **not** install the helper, and the browser reaches the internet through
+it — so if it is missing, they say so and point at the installer rather than
+leaving you with a loopback entry and nothing listening on it.
 
 ## Requirements
 
