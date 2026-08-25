@@ -3,8 +3,8 @@
   "notes": "Title menu no longer flashes when scrolling past Find Content; detail page and level-list fixes.",
   "module": {
     "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.2/itgmania-content-browser-module-0.2.zip",
-    "sha256": "47960a2b77db2882cfc4e22cc32ad30372dfdc61596369e8ba0f619d0e276ab9",
-    "bytes": 240227
+    "sha256": "3fed38bea72bd0516c7330c08f67ac57088e3c2a85e4661e93656c4f02845505",
+    "bytes": 245493
   },
   "minHelper": "0.1"
 }

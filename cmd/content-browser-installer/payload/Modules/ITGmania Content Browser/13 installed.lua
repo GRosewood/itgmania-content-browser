@@ -293,10 +293,25 @@ local function ActiveTabIndex()
 	return 2
 end
 
-local function TabIsActive(tab)
-	-- while the cursor is on the row it leads; otherwise the active view does
-	local want = (state.zone == "tabs") and state.tabIndex or ActiveTabIndex()
-	return TabOrder[want] == (tab.view or tab.mode)
+-- What a tab is, of the three things it can be.
+--
+-- Where the cursor is and which view the page is on are separate facts, and a
+-- tab can be either, both, or neither. Deciding them from one index meant only
+-- one tab was ever lit: while the cursor was on the row the page's own tab
+-- showed as nothing, and the moment the cursor stepped off onto the update
+-- chip that tab lit up in full accent with the cursor nowhere near it.
+--
+-- "focus" wins when a tab is both, because the cursor is the more specific
+-- thing to say about it.
+local function TabRole(tab)
+	local key = tab.view or tab.mode
+	if state.zone == "tabs" and TabOrder[state.tabIndex] == key then
+		return "focus"
+	end
+	if TabOrder[ActiveTabIndex()] == key then
+		return "shown"
+	end
+	return "idle"
 end
 
 local function EnterInstalled()
@@ -329,5 +344,5 @@ CB.InstalledPage       = InstalledPage
 CB.InstalledPages      = InstalledPages
 CB.InstalledStatusText = InstalledStatusText
 CB.ScanInstalled       = ScanInstalled
-CB.TabIsActive         = TabIsActive
+CB.TabRole             = TabRole
 CB.TabOrder            = TabOrder

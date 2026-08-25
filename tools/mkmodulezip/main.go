@@ -7,13 +7,21 @@
 // have given them.
 //
 // The archive is deterministic -- entries sorted, timestamps zeroed -- so
-// rebuilding the same source twice produces the same bytes and so the same
-// checksum. A release rebuilt to fix the build machine does not invalidate a
-// manifest that was already published.
+// rebuilding the same source ON THE SAME TOOLCHAIN produces the same bytes and
+// so the same checksum.
+//
+// It does NOT survive a change of toolchain. compress/flate makes no promise
+// about its output across Go releases, so a zip built here and a zip built by
+// CI can hold byte-identical files and still differ by several kilobytes --
+// which was enough to publish a manifest whose checksum no player could match.
+// The only checksum worth committing is the one taken from the file that was
+// actually uploaded, which is what -verify is for.
 //
 // Usage:
 //
 //	go run ./tools/mkmodulezip -version 0.2 -out dist
+//	go run ./tools/mkmodulezip -verify dist/update.json          # check
+//	go run ./tools/mkmodulezip -verify update.json -fix          # check and repair
 package main
 
 import (
@@ -26,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -46,13 +55,100 @@ func main() {
 		out     = flag.String("out", "dist", "directory to write into")
 		src     = flag.String("payload", payloadDir, "payload directory to archive")
 		baseURL = flag.String("url", "", "where the archive will be published (default: the GitHub release for this version)")
+		verify  = flag.String("verify", "", "download the file a manifest points at, check its checksum, and exit")
+		fix     = flag.Bool("fix", false, "with -verify, rewrite the manifest to match what is published")
 	)
 	flag.Parse()
+
+	// -verify builds nothing. It is the step between uploading the archive and
+	// committing the manifest: the commit is what makes an update live, so a
+	// manifest that disagrees with the published file hands every player a
+	// download that fails its checksum.
+	if *verify != "" {
+		if err := verifyManifest(*verify, *fix); err != nil {
+			fmt.Fprintf(os.Stderr, "mkmodulezip: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(*version, *out, *src, *baseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "mkmodulezip: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// verifyManifest fetches whatever the manifest points at and checks it really
+// is the file the manifest describes.
+//
+// This exists because the checksum in a manifest and the bytes on the release
+// are produced by two different machines, and nothing else compares them. A
+// mismatch is invisible until a player tries to update and is told the
+// download is corrupt.
+func verifyManifest(path string, fix bool) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var man update.Manifest
+	if err := json.Unmarshal(raw, &man); err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	if man.Module.URL == "" {
+		return fmt.Errorf("%s names no module URL to check", path)
+	}
+
+	fmt.Printf("  manifest: %s\n", path)
+	fmt.Printf("  version:  %s\n", man.Version)
+	fmt.Printf("  fetching: %s\n", man.Module.URL)
+
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(man.Module.URL)
+	if err != nil {
+		return fmt.Errorf("fetching the published archive: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("the published archive is not there: http %d\n"+
+			"  Upload the archive to the release before committing the manifest.",
+			resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading the published archive: %w", err)
+	}
+
+	sum := sha256.Sum256(body)
+	got := hex.EncodeToString(sum[:])
+	okSHA := got == man.Module.SHA256
+	okLen := int64(len(body)) == man.Module.Bytes
+
+	fmt.Printf("  published: %s  (%d bytes)\n", got, len(body))
+	fmt.Printf("  manifest:  %s  (%d bytes)\n", man.Module.SHA256, man.Module.Bytes)
+
+	if okSHA && okLen {
+		fmt.Println("  OK: the manifest describes the file that is published.")
+		return nil
+	}
+
+	if !fix {
+		return fmt.Errorf("the manifest does not match the published archive.\n" +
+			"  Every player would download it and reject it as corrupt.\n" +
+			"  Re-run with -fix to write the published file's checksum into the manifest,\n" +
+			"  or upload the archive this manifest was built from.")
+	}
+
+	man.Module.SHA256 = got
+	man.Module.Bytes = int64(len(body))
+	out, err := json.MarshalIndent(man, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	fmt.Println("  FIXED: the manifest now matches the published archive.")
+	return nil
 }
 
 func run(version, out, src, url string) error {

@@ -215,6 +215,30 @@ refuses to build a release while any of the four disagree, and `mkmodulezip`
 refuses to cut an archive whose stamp does not match, so a drift fails the
 build instead of shipping.
 
+### Publish in this order
+
+1. Bump the three versions, run `./build.sh`.
+2. Set `minHelper` in `dist/update.json` to the **oldest helper that can run
+   this module** — not automatically this release. It defaults to the version
+   being cut, which refuses the in-game update for everyone on an older
+   helper and tells them to run the installer instead.
+3. Tag `v<version>` and upload the module zip to that release.
+4. Copy `dist/update.json` to the repo root and **check it against what you
+   actually uploaded**:
+
+   ```bash
+   go run ./tools/mkmodulezip -verify update.json -fix
+   ```
+
+5. Only then commit `update.json`. That commit is what makes the update live.
+
+Step 4 is not a formality. The archive is deterministic only for a **fixed Go
+toolchain**: `compress/flate` gives no guarantee across Go releases, so a zip
+built locally and one built by CI can hold byte-identical files and still
+differ by kilobytes. The checksum worth committing is the one taken from the
+file that is actually published — which is what `-verify` reads. Without it a
+release looks fine until a player updates and is told the download is corrupt.
+
 ## Layout
 
 ```

@@ -18,7 +18,7 @@ local InPackList      = CB.InPackList
 local InYearView      = CB.InYearView
 local LO              = CB.LO
 local Spinner         = CB.Spinner
-local TabIsActive     = CB.TabIsActive
+local TabRole         = CB.TabRole
 local TotalPages      = CB.TotalPages
 local state           = CB.state
 
@@ -55,10 +55,7 @@ function CB.Screen.Tabs(ui)
 		-- the row is a menu, and a menu item should look like something you
 		-- can land on before you have landed on it. Three states -- the one
 		-- the cursor is on, the one the page is showing, and the rest.
-		local function TabState()
-			if not TabIsActive(tab) then return "idle" end
-			return (state.zone == "tabs") and "focus" or "shown"
-		end
+		local function TabState() return TabRole(tab) end
 
 		tabsAF[#tabsAF+1] = Def.Quad{
 			InitCommand = function(self)
