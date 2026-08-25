@@ -204,12 +204,28 @@ func verify(blob []byte) error {
 	if stamp == "" {
 		return fmt.Errorf("the archive has no %s stamp", stampName)
 	}
+	// A dev build is not a release, and build.sh names it dev-<sha> precisely so
+	// it cannot be mistaken for one -- which means the stamp can never match it.
+	// Enforcing the match here anyway failed every ordinary push to main while
+	// build.sh had already, deliberately, waived the same rule. Only the
+	// equality is relaxed: the archive must still read back, still contain the
+	// entry point, still carry a stamp, and still hold only usable paths.
+	if isDevVersion(verifyVersion) {
+		fmt.Printf("  (dev build: the payload stamp stays %q and is not checked "+
+			"against %q -- this archive is not publishable)\n", stamp, verifyVersion)
+		return nil
+	}
 	if stamp != verifyVersion {
 		return fmt.Errorf("the VERSION stamp says %q but this release is %q -- "+
 			"update the stamp in the payload", stamp, verifyVersion)
 	}
 	return nil
 }
+
+// isDevVersion matches the names build.sh gives a build that is not a release.
+// The two must agree: build.sh exempts these from its own version-drift check,
+// and a stricter rule here only moves the failure a few lines later.
+func isDevVersion(v string) bool { return strings.HasPrefix(v, "dev-") }
 
 // verifyVersion is what verify checks the stamp against; main sets it before
 // verifying. A package-level variable rather than a parameter only to keep
