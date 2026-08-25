@@ -19,9 +19,9 @@ func TestTaskXMLPinsTriggerAndPrincipal(t *testing.T) {
 		t.Skipf("no current user in this environment: %v", err)
 	}
 	for _, want := range []string{
-		"<LogonTrigger>",         // it must be a logon trigger, not a schedule
-		"InteractiveToken",       // ...running in the user's own session
-		"LeastPrivilege",         // ...unelevated
+		"<LogonTrigger>",   // it must be a logon trigger, not a schedule
+		"InteractiveToken", // ...running in the user's own session
+		"LeastPrivilege",   // ...unelevated
 		"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", // never killed at 72h
 		"-install-dir",           // the helper is pinned to this install
 		"content-browser-helper", // and it runs the helper, not the installer
