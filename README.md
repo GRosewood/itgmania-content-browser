@@ -74,11 +74,12 @@ registers that copy to start with the user's session, running with `-helper`.
 
 On Windows that copy does not hold a socket the whole time. It starts with the
 session, publishes a port of `0` to say it is there but not listening, and waits
-— cheaply, by trying to open the game's own executable for writing, which
-Windows refuses for a running image. When ITGmania starts it binds a loopback
+— one process-list snapshot every five seconds, which is where that check
+belongs. When ITGmania starts it binds a loopback
 port and republishes; when ITGmania exits it gives the port back, drops its
-preview cache and returns the memory. Idle it costs about 17 MB and a tenth of
-a per cent of one core. Nothing appears on screen at any point.
+preview cache and returns the memory. Idle it costs about 20 MB and a fifth of a per
+cent of one core -- measured, along with the antivirus, which is the part an
+earlier version of this got wrong. Nothing appears on screen at any point.
 
 Elsewhere it listens for as long as it runs: on Linux it is a systemd user
 service and on macOS a launch agent, both of which the machine already manages

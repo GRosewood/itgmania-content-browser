@@ -241,7 +241,7 @@ func runHelper(target, manifestURL string) int {
 // the poll takes to see it, so the socket is up before anything asks.
 func watchForGame(inst installer.Install, srv *helper.Server, previews *preview.Fetcher, done <-chan struct{}) {
 	for {
-		pid, ok := installer.WaitForGame(inst, done)
+		pid, ok := installer.WaitForGame(done)
 		if !ok {
 			return // the helper is shutting down
 		}

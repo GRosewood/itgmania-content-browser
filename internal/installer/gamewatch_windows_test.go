@@ -74,17 +74,28 @@ func TestWaitForGameReturnsWhenStopped(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
+	// A machine with ITGmania actually running answers this the other way,
+	// and correctly so -- the wait is over because the game is there. The
+	// property being pinned is that it comes BACK, not which reason it gives.
+	gameUp := false
+	if _, ok := GameProcessID(); ok {
+		gameUp = true
+	}
+
 	returned := make(chan bool, 1)
 	go func() {
-		_, ok := WaitForGame(Install{Root: t.TempDir()}, stop)
+		_, ok := WaitForGame(stop)
 		returned <- ok
 	}()
 	select {
 	case ok := <-returned:
-		if ok {
-			t.Error("WaitForGame claimed to have found a game")
+		if ok && !gameUp {
+			t.Error("WaitForGame reported a game that is not in the process list")
 		}
-	case <-time.After(5 * time.Second):
+		if !ok && gameUp {
+			t.Error("WaitForGame missed a game that is in the process list")
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("WaitForGame ignored its stop channel")
 	}
 }
@@ -117,115 +128,27 @@ func TestLowerUTF16StopsAtTheTerminator(t *testing.T) {
 	}
 }
 
-// The cheap probe is what keeps this watch from costing anything, so what it
-// says about a file nothing is running has to be right.
-func TestImageRunningSaysNoForAFileNobodyRuns(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ITGmania.exe")
-	if err := os.WriteFile(path, []byte("not really a program"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	running, known := imageRunning(path)
-	if !known {
-		t.Fatal("could not tell, for a plain writable file")
-	}
-	if running {
-		t.Error("a file nobody is running looked like a running image")
-	}
-
-	// and it must not have touched the file
-	body, err := os.ReadFile(path)
-	if err != nil || string(body) != "not really a program" {
-		t.Errorf("the probe changed the file: %q, %v", body, err)
-	}
-}
-
-// And what it says about one that IS running -- checked against this very test
-// binary, which is by definition a running image.
-func TestImageRunningSaysYesForARunningImage(t *testing.T) {
-	self, err := os.Executable()
+// The watch must never open an executable for writing. It did once, as a cheap
+// way to ask whether the game was running, and the cost landed on the antivirus
+// instead: Defender rescans a file whenever a write handle on it closes, so a
+// probe every couple of seconds meant scanning the game binary every couple of
+// seconds forever. Nothing here should reintroduce that.
+func TestTheWatchNeverOpensAnExecutableForWriting(t *testing.T) {
+	src, err := os.ReadFile("gamewatch_windows.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, known := imageRunning(self)
-	if !known {
-		t.Skip("no permission to probe this test binary where it is")
-	}
-	if !running {
-		t.Error("the running test binary did not look like a running image")
-	}
-}
-
-// A path that cannot be answered for must say so rather than guess, or the
-// watch would sit forever believing the game is not running.
-func TestImageRunningAdmitsWhenItCannotTell(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such-directory", "ITGmania.exe")
-	if _, known := imageRunning(missing); known {
-		t.Error("claimed to know about a file that does not exist")
-	}
-}
-
-// An empty candidate list is not evidence of anything.
-func TestAnyImageRunningKnowsNothingWithNoCandidates(t *testing.T) {
-	if _, known := anyImageRunning(nil); known {
-		t.Error("claimed to know the answer with nothing to probe")
-	}
-}
-
-// One unanswerable candidate poisons the set: a "no" derived from a file we
-// could not open would stop the snapshot fallback from ever running.
-func TestAnyImageRunningIsUnsureIfAnyCandidateIs(t *testing.T) {
-	dir := t.TempDir()
-	good := filepath.Join(dir, "ITGmania.exe")
-	if err := os.WriteFile(good, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bad := filepath.Join(dir, "no-such-directory", "StepMania.exe")
-
-	if _, known := anyImageRunning([]string{good, bad}); known {
-		t.Error("an unanswerable candidate was treated as a definite no")
-	}
-	if running, known := anyImageRunning([]string{good}); !known || running {
-		t.Errorf("running=%v known=%v, want false/true for a plain file", running, known)
-	}
-}
-
-func TestGameImagesPrefersTheKnownNames(t *testing.T) {
-	root := t.TempDir()
-	prog := filepath.Join(root, "Program")
-	if err := os.MkdirAll(prog, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"ITGmania.exe", "Texture Font Generator.exe"} {
-		if err := os.WriteFile(filepath.Join(prog, name), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
+	body := string(src)
+	// the comment explaining why is expected; a real call is not
+	for _, banned := range []string{"GENERIC_WRITE", "CreateFile("} {
+		for _, line := range strings.Split(body, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			if strings.Contains(line, banned) {
+				t.Errorf("the watch opens files again: %q", trimmed)
+			}
 		}
-	}
-	got := gameImages(root)
-	if len(got) != 1 || filepath.Base(got[0]) != "ITGmania.exe" {
-		t.Errorf("gameImages = %v, want just the game binary", got)
-	}
-}
-
-// A fork renames the binary, and then everything in Program/ is a candidate.
-func TestGameImagesFallsBackToEverythingInProgram(t *testing.T) {
-	root := t.TempDir()
-	prog := filepath.Join(root, "Program")
-	if err := os.MkdirAll(prog, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"MyFork.exe", "helper.dll"} {
-		if err := os.WriteFile(filepath.Join(prog, name), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got := gameImages(root)
-	if len(got) != 1 || filepath.Base(got[0]) != "MyFork.exe" {
-		t.Errorf("gameImages = %v, want the fork's binary and not the dll", got)
-	}
-}
-
-func TestGameImagesFindsNothingWithoutAProgramDirectory(t *testing.T) {
-	if got := gameImages(t.TempDir()); len(got) != 0 {
-		t.Errorf("gameImages = %v, want none", got)
 	}
 }

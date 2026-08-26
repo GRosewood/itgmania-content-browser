@@ -18,7 +18,7 @@ func GameWatchSupported() bool { return false }
 // WaitForGame is never called where the watch is unsupported. It returns at
 // once rather than blocking, so a caller that ignores GameWatchSupported spins
 // visibly instead of hanging silently.
-func WaitForGame(inst Install, stop <-chan struct{}) (uint32, bool) { return 0, false }
+func WaitForGame(stop <-chan struct{}) (uint32, bool) { return 0, false }
 
 // WaitForGameExit likewise does nothing here.
 func WaitForGameExit(pid uint32) {}
