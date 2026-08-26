@@ -161,30 +161,36 @@ done
 # a player who updates in game ends up with exactly the files a fresh install
 # would have given them.
 #
-# The manifest beside it is what the helper reads to decide whether there is
-# anything to offer. Publishing a release is: run this, upload the zip to the
-# release, verify the download's sha256 matches the manifest, and only THEN
-# commit update.json -- the commit is what makes the update live, and a live
-# manifest pointing at an asset that is not there yet offers every player a
-# download that fails.
+# The manifest beside it is what the browser reads to decide whether there is
+# anything to offer, and it carries THIS archive's checksum.
+#
+# Which is why a copy is kept at release/module.zip and committed: zip output
+# is not stable across Go versions, so the archive a CI runner builds from the
+# very same source has different bytes to this one. Publishing CI's copy while
+# the manifest described this one failed the checksum for every player -- three
+# releases running. The release workflow now publishes the committed copy and
+# refuses to publish at all if it disagrees with update.json.
 MODULE_ZIP="itgmania-content-browser-module-${VERSION}.zip"
 echo "  building module     payload  -> ${MODULE_ZIP}"
 go run ./tools/mkmodulezip -version "${VERSION}" -out "$OUT"
+case "$VERSION" in
+  dev-*) ;;   # never stage a dev build for release
+  *)
+    mkdir -p release
+    cp "$OUT/${MODULE_ZIP}" release/module.zip
+    echo "  staged for release  -> release/module.zip"
+    ;;
+esac
 echo
 echo "  To publish:"
-echo "    1. fill in the manifest notes, and set minHelper to the oldest helper"
-echo "       that can run this module"
-echo "    2. tag v${VERSION} and upload ${MODULE_ZIP} to that release"
-echo "    3. copy dist/update.json to the repo root, then check it against what"
-echo "       you actually uploaded.  The archive built here and the one on the"
-echo "       release can differ even with identical contents, because zip"
-echo "       compression is not stable across Go versions:"
-echo ""
-echo "         go run ./tools/mkmodulezip -verify update.json -fix"
-echo ""
-echo "    4. only then commit update.json.  The commit is what makes the update"
-echo "       live, and a manifest that disagrees with the published file fails"
-echo "       the checksum for every player who takes it."
+echo "    1. fill in the manifest notes, and set minHelper to the oldest version"
+echo "       that can take this update in game"
+echo "    2. copy dist/update.json to the repo root, then commit BOTH it and"
+echo "       release/module.zip -- that archive is the one its checksum"
+echo "       describes, and the one the release will publish"
+echo "    3. tag v${VERSION} and push. The workflow attaches the committed"
+echo "       archive and refuses to publish if it disagrees with the manifest,"
+echo "       so a mismatch fails the release instead of every player's update."
 echo
 echo "  Artifacts in $OUT/:"
 ls -1 "$OUT"

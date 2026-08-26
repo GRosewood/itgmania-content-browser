@@ -1025,6 +1025,21 @@ local BrowserInput = function(event)
 			UP.job = nil
 			state.mode = InInstalledView() and "installed"
 			             or InYearView() and "year" or "list"
+			-- Put the reader back somewhere that answers.
+			--
+			-- Only the mode was restored here, which left the cursor on the
+			-- update chip -- a zone with no rows under it -- looking at
+			-- whichever tab the strip happened to show. The chip may also be
+			-- gone now, since it only exists while an update is on offer, and
+			-- a cursor on a zone that no longer exists answers nothing at all.
+			state.zone = "tabs"
+			state.tabIndex = ActiveTabIndex()
+			-- ...and give it something to show. Nothing here fetched while the
+			-- update held the screen, so a view that was never populated (or
+			-- was cleared on the way in) would come back empty.
+			if #state.packs == 0 and state.mode == "list" then
+				FetchPacks(1, false)
+			end
 			Refresh()
 		end
 		return false

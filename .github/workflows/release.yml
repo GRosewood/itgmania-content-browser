@@ -87,10 +87,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Collect and checksum
+      - name: Collect the built artifacts
         run: |
           mkdir -p dist
           # The semicolon is escaped so find receives it as the -exec terminator
@@ -98,7 +99,61 @@ jobs:
           # aborts with "missing argument to -exec", dist stays empty, and the
           # checksum step below runs on nothing.
           find artifacts -type f -exec cp {} dist/ \;
-          cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      # The module archive is the one thing whose exact BYTES are promised:
+      # update.json carries its sha256 and the browser refuses an archive that
+      # does not match. Zip output is not stable across Go versions, so the copy
+      # this runner just built differs from the one the maintainer checksummed
+      # even though the contents are identical -- which failed the in-game
+      # update for every player, three releases running.
+      #
+      # So the committed archive wins, and a disagreement stops the release
+      # here rather than reaching anybody.
+      - name: Publish the archive the manifest describes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          zip="dist/itgmania-content-browser-module-${version}.zip"
+
+          if [ ! -f release/module.zip ]; then
+            echo "release/module.zip is missing."
+            echo "Run ./build.sh, then commit it together with update.json."
+            exit 1
+          fi
+          cp release/module.zip "$zip"
+
+          manifest_version=$(jq -r .version update.json)
+          want_sha=$(jq -r .module.sha256 update.json)
+          want_bytes=$(jq -r .module.bytes update.json)
+          got_sha=$(sha256sum "$zip" | cut -d' ' -f1)
+          got_bytes=$(stat -c%s "$zip")
+
+          fail=0
+          if [ "$manifest_version" != "$version" ]; then
+            echo "update.json says version $manifest_version, the tag says $version"; fail=1
+          fi
+          if [ "$want_sha" != "$got_sha" ]; then
+            echo "update.json sha256   $want_sha"
+            echo "release/module.zip   $got_sha"; fail=1
+          fi
+          if [ "$want_bytes" != "$got_bytes" ]; then
+            echo "update.json bytes $want_bytes, archive $got_bytes"; fail=1
+          fi
+          if [ "$fail" = 1 ]; then
+            echo
+            echo "The manifest does not describe the archive being published."
+            echo "Re-run ./build.sh and commit update.json and release/module.zip together."
+            exit 1
+          fi
+          # the manifest attached to the release is the committed one too, so
+          # every file in the release describes the same archive
+          cp update.json dist/update.json
+
+          echo "manifest and archive agree: $got_sha ($got_bytes bytes)"
+
+      - name: Checksums
+        shell: bash
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

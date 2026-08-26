@@ -234,29 +234,28 @@ build instead of shipping.
 
 ### Publish in this order
 
-1. Bump the three versions, run `./build.sh`.
-2. Set `minHelper` in `dist/update.json` to the **oldest browser version
-   that can update itself to this module in-game** — not automatically this
-   release. It defaults to the version being cut, which refuses the in-game
-   update for everyone older and points them at the installer instead. (The
-   name is a fossil from when a helper applied updates; the field now gates
-   the module's own updater.)
-3. Tag `v<version>` and upload the module zip to that release.
-4. Copy `dist/update.json` to the repo root and **check it against what you
-   actually uploaded**:
+1. Bump the three versions, run `./build.sh`. It writes the release archive to
+   `dist/` **and stages a copy at `release/module.zip`** — that copy is the one
+   the release will publish.
+2. Set `minHelper` in `dist/update.json` to the **oldest browser version that
+   can update itself to this module in-game** — not automatically this release.
+   It defaults to the version being cut, which refuses the in-game update for
+   everyone older and points them at the installer instead. (The name is a
+   fossil from when a helper applied updates; the field now gates the module's
+   own updater.) Fill in `notes` while you are there.
+3. Copy `dist/update.json` to the repo root and commit it **together with**
+   `release/module.zip`. They describe each other: the manifest carries that
+   archive's sha256.
+4. Tag `v<version>` and push.
 
-   ```bash
-   go run ./tools/mkmodulezip -verify update.json -fix
-   ```
-
-5. Only then commit `update.json`. That commit is what makes the update live.
-
-Step 4 is not a formality. The archive is deterministic only for a **fixed Go
-toolchain**: `compress/flate` gives no guarantee across Go releases, so a zip
-built locally and one built by CI can hold byte-identical files and still
-differ by kilobytes. The checksum worth committing is the one taken from the
-file that is actually published — which is what `-verify` reads. Without it a
-release looks fine until a player updates and is told the download is corrupt.
+The workflow publishes the committed `release/module.zip` rather than the copy
+the runner builds, and refuses to publish at all if the manifest disagrees with
+it. That refusal matters: the archive is deterministic only for a **fixed Go
+toolchain** — `compress/flate` makes no promise across Go releases, so a zip
+built locally and one built by CI can hold byte-identical files and still differ
+by kilobytes. Publishing the runner's copy against a manifest describing the
+local one is what failed the in-game update three releases running: the release
+looked fine, and every player who took it was told the download was corrupt.
 
 ## Layout
 
