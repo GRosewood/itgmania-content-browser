@@ -258,6 +258,27 @@ func RemoveHelperBinary(inst Install) bool {
 // HelperInstalled reports whether this install has a helper binary at all.
 func HelperInstalled(inst Install) bool { return isFile(HelperBinary(inst)) }
 
+// HelperWaiting reports the helper being up but deliberately holding no socket
+// because ITGmania is not running.
+//
+// It is a state, not a fault, and the difference matters: on Windows this is
+// what the helper looks like almost all the time, and reporting it as "not
+// answering" would put a scary line in front of every player whose game happens
+// to be closed -- which is every player running this check.
+//
+// A port of zero is how the helper says so. It publishes one on purpose rather
+// than withdrawing the file, so that this question has an answer at all.
+func HelperWaiting(inst Install) bool {
+	raw, err := os.ReadFile(filepath.Join(HelperDir(inst), "helper.json"))
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		Port int `json:"port"`
+	}
+	return json.Unmarshal(raw, &cfg) == nil && cfg.Port == 0
+}
+
 // HelperRunning asks the helper itself whether it is there.
 //
 // The config file existing is not the same question: it outlives a crash, and a

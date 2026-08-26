@@ -72,6 +72,18 @@ installer adds `127.0.0.1` to `HttpAllowHosts`, copies itself to
 `<SaveDir>/ITGmaniaContentBrowser/content-browser-helper` (about 10 MB) and
 registers that copy to start with the user's session, running with `-helper`.
 
+On Windows that copy does not hold a socket the whole time. It starts with the
+session, publishes a port of `0` to say it is there but not listening, and waits
+— cheaply, by trying to open the game's own executable for writing, which
+Windows refuses for a running image. When ITGmania starts it binds a loopback
+port and republishes; when ITGmania exits it gives the port back, drops its
+preview cache and returns the memory. Idle it costs about 17 MB and a tenth of
+a per cent of one core. Nothing appears on screen at any point.
+
+Elsewhere it listens for as long as it runs: on Linux it is a systemd user
+service and on macOS a launch agent, both of which the machine already manages
+out of sight.
+
 That service:
 
 * binds **127.0.0.1 on an OS-assigned port** and nothing else;
@@ -147,6 +159,9 @@ Most problems are one of these:
 
 * **"Local helper: NOT RUNNING"** — the browser reaches the internet through
   it, so the browser will not open at all. Re-run the installer.
+* **"Local helper: running, waiting for ITGmania to start"** (Windows) — not a
+  problem. It opens its socket when the game does. Nothing is listening because
+  nothing needs to be.
 * **"starts only once a DESKTOP session starts"** — the machine boots straight
   into the game, so nothing ever runs the helper. Re-run the installer, which
   moves the install to a mechanism that does not need one.

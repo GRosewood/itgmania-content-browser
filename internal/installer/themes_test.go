@@ -3,6 +3,7 @@ package installer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -191,5 +192,69 @@ func TestPickThemeReportsWhenNothingWillDo(t *testing.T) {
 	}
 	if len(CompatibleThemes(inst)) != 0 {
 		t.Error("found a compatible theme where there is none")
+	}
+}
+
+// The engine mounts <profile>/Themes over the install's own (ArchHooks_Unix.cpp
+// mounts sUserDataPath+"/Themes" at "/Themes"; the other platforms do the same
+// for their profile directories). On a Linux cabinet the game is in /opt owned
+// by root, so a theme the player adds goes in their profile -- and a theme list
+// built only from the install directory cannot see it. The theme in use was
+// then never found, and the module went into whichever theme sorted first.
+func TestThemesIncludesTheProfileAndPrefersIt(t *testing.T) {
+	root := t.TempDir()
+	profile := t.TempDir()
+
+	installThemes := filepath.Join(root, "Themes")
+	profileThemes := filepath.Join(profile, "Themes")
+	const overlay = `local f = FILEMAN:GetDirListing("Modules/")`
+	const metrics = `[ScreenTitleMenu]
+Choice1="screen,ScreenExit"
+`
+	writeTheme(t, installThemes, "Simply Love", overlay, metrics)
+	writeTheme(t, profileThemes, "Simply Love-SM5", overlay, metrics)
+	// the same name in both: the profile copy is the one the game loads
+	writeTheme(t, installThemes, "Shared", overlay, metrics)
+	writeTheme(t, profileThemes, "Shared", overlay, metrics)
+
+	save := filepath.Join(profile, "Save")
+	if err := os.MkdirAll(save, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(save, "Preferences.ini"),
+		[]byte("[Options]\nTheme=Simply Love-SM5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	inst := Install{Root: root, ThemesDir: installThemes, SaveDir: save}
+
+	var sm5 *Theme
+	shared := 0
+	for i := range Themes(inst) {
+		th := Themes(inst)[i]
+		if th.Name == "Simply Love-SM5" {
+			t2 := th
+			sm5 = &t2
+		}
+		if th.Name == "Shared" {
+			shared++
+			if !strings.HasPrefix(th.Path, profileThemes) {
+				t.Errorf("Shared resolved to %q, want the profile copy", th.Path)
+			}
+		}
+	}
+	if sm5 == nil {
+		t.Fatal("the theme in the player's profile was not listed at all")
+	}
+	if !sm5.Current {
+		t.Error("the theme named in Preferences.ini was not marked as in use")
+	}
+	if shared != 1 {
+		t.Errorf("a theme present in both places was listed %d times, want 1", shared)
+	}
+
+	// ...and that is where the module must go.
+	if got := inst.SimplyLoveDir(); got != filepath.Join(profileThemes, "Simply Love-SM5") {
+		t.Errorf("SimplyLoveDir = %q, want the profile's Simply Love-SM5", got)
 	}
 }

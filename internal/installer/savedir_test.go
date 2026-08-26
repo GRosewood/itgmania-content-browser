@@ -103,6 +103,12 @@ func TestInspectReportsWhetherPrefsWereFound(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// An install is identified by having the game in it, so the fixture needs
+	// one. Directory names alone also describe the profile ITGmania keeps
+	// beside the install, which is not an install.
+	if err := os.WriteFile(filepath.Join(root, "Program", "ITGmania.exe"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	// Portable.ini makes the local Save definitive, marker or not.
 	if err := os.WriteFile(filepath.Join(root, "Portable.ini"), nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -157,5 +163,53 @@ func TestPickSaveDirPrefersTheFreshestAcrossProfiles(t *testing.T) {
 	got, found := pickSaveDir(local, []string{old, live})
 	if !found || got != live {
 		t.Errorf("got %q found=%v, want the freshest %q", got, found, live)
+	}
+}
+
+// ITGmania mirrors its layout into the player's profile: ~/.itgmania holds
+// Save/, Cache/, Songs/, Themes/ and NoteSkins/ as well. Matching on those
+// names reported one copy of the game as two installs, and choosing the
+// profile gave an empty theme list and the wrong answer about the theme in
+// use. Only the copy with the executable in it is an install.
+func TestProfileDirectoryIsNotAnInstall(t *testing.T) {
+	profile := t.TempDir()
+	for _, dir := range []string{"Themes", "NoteSkins", "Songs", "Save", "Cache"} {
+		if err := os.MkdirAll(filepath.Join(profile, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := Inspect(profile); ok {
+		t.Fatal("a profile directory was reported as an ITGmania installation")
+	}
+
+	// The same tree with the game in it is one.
+	if err := os.MkdirAll(filepath.Join(profile, "Program"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "Program", "ITGmania.exe"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Inspect(profile); !ok {
+		t.Fatal("a real install was not recognised")
+	}
+}
+
+// The Linux layout has the binary at the top, beside Themes/ -- which is what
+// ITGmania's own desktop entry points at (TryExec=/opt/itgmania/itgmania).
+func TestLinuxInstallIsRecognisedByItsBinary(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"Themes", "NoteSkins"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := Inspect(root); ok {
+		t.Fatal("recognised an install with no game in it")
+	}
+	if err := os.WriteFile(filepath.Join(root, "itgmania"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Inspect(root); !ok {
+		t.Fatal("did not recognise a Linux install by its binary")
 	}
 }

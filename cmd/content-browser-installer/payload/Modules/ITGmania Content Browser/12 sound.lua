@@ -322,6 +322,17 @@ function Snd.InLane(note, lane)
 	return math.floor(note.c / (2 ^ (lane - 1))) % 2 == 1
 end
 
+-- Is that column's note a lift rather than a tap? Lifts are a subset of the
+-- columns already in Snd.InLane, carried in their own mask, so a row can hold
+-- both at once and each column answers for itself. The mask is missing from a
+-- preview cached before this existed, which reads as no lifts -- the way that
+-- chart was drawn until now.
+function Snd.IsLift(note, lane)
+	local mask = note.l
+	if not mask or mask == 0 then return false end
+	return math.floor(mask / (2 ^ (lane - 1))) % 2 == 1
+end
+
 -- Where a column sits, for a field of however many columns there are. The
 -- arrows are the width of the column, edge to edge, the way a note field is
 -- -- doubles is the same four directions twice over, which is what the pad is.

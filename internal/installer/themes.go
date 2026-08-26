@@ -140,33 +140,72 @@ func CurrentTheme(saveDir string) string {
 	return global
 }
 
+// ThemeRoots is every directory the game loads themes from, in the order the
+// engine mounts them -- the player's profile first, because it is mounted OVER
+// the install.
+//
+// This is not a detail. ArchHooks_Unix.cpp mounts <profile>/Themes at /Themes
+// alongside the install's own, and the Windows and macOS hooks do the same for
+// their profile directories. On a Linux cabinet the game lives in
+// /opt/itgmania, owned by root, so a player adding a theme puts it in their
+// profile -- and a theme list built only from the install directory could not
+// see it. The theme actually in use was therefore never found, Current never
+// matched anything, and the module went into whichever theme sorted first.
+func ThemeRoots(inst Install) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(dir string) {
+		if dir == "" || seen[dir] || !isDir(dir) {
+			return
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	// The profile's Themes, which the engine mounts over the install's.
+	if inst.SaveDir != "" && !inst.Portable {
+		add(filepath.Join(filepath.Dir(inst.SaveDir), "Themes"))
+	}
+	add(inst.ThemesDir)
+	return out
+}
+
 // Themes lists the install's theme directories, best candidate first.
 func Themes(inst Install) []Theme {
-	entries, err := os.ReadDir(inst.ThemesDir)
-	if err != nil {
-		return nil
-	}
 	current := CurrentTheme(inst.SaveDir)
 
 	var found []Theme
-	for _, e := range entries {
-		if !e.IsDir() {
+	seen := map[string]bool{}
+	for _, root := range ThemeRoots(inst) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
 			continue
 		}
-		name := e.Name()
-		// _fallback is the engine's own base theme, not something to install into
-		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
-			continue
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			// _fallback is the engine's own base theme, not something to
+			// install into
+			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+				continue
+			}
+			// The profile is listed first and wins: the engine mounts it over
+			// the install, so that is the copy the game actually loads.
+			if seen[strings.ToLower(name)] {
+				continue
+			}
+			seen[strings.ToLower(name)] = true
+			dir := filepath.Join(root, name)
+			found = append(found, Theme{
+				Name:      name,
+				Path:      dir,
+				Modules:   themeLoadsModules(dir),
+				TitleMenu: themeHasTitleChoices(dir),
+				Current:   strings.EqualFold(name, current),
+				Installed: themeHasModule(dir),
+			})
 		}
-		dir := filepath.Join(inst.ThemesDir, name)
-		found = append(found, Theme{
-			Name:      name,
-			Path:      dir,
-			Modules:   themeLoadsModules(dir),
-			TitleMenu: themeHasTitleChoices(dir),
-			Current:   strings.EqualFold(name, current),
-			Installed: themeHasModule(dir),
-		})
 	}
 
 	// Best first: one it would run under, that the player is using, that it is

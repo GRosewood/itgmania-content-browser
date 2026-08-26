@@ -17,6 +17,7 @@ local FetchPacks           = CB.FetchPacks
 local LO                   = CB.LO
 local LiftAboveSystemLayer = CB.LiftAboveSystemLayer
 local REFRESH_SECS         = CB.REFRESH_SECS
+local AbandonSearch        = CB.AbandonSearch
 local Refresh              = CB.Refresh
 local SetRedirect          = CB.SetRedirect
 local UP                   = CB.UP
@@ -42,6 +43,7 @@ function CB.Screen.Frame()
 			-- would show those rows under whichever tab happens to be active
 			state.localRows = nil
 			state.viewYear = nil
+			AbandonSearch()
 			state.search = ""
 			-- converge any search term left by an interrupted text entry
 			if state.pendingSearch ~= nil then

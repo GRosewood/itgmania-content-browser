@@ -127,6 +127,12 @@ fi
 # release arrives without +x, so every Linux and macOS user has to chmod it
 # before it runs -- a step people reasonably skip and then report as a broken
 # installer.
+#
+# Which is why the bare binary does not survive this loop: it is an input to the
+# tarball, not an artifact. Shipping both put two files on the release page that
+# differ only in whether the thing inside will run, and the broken one sorts
+# first. Windows keeps its plain .exe -- nothing there strips a permission bit,
+# and a Windows user handed a .tar.gz has been given a chore.
 UNIVERSAL="darwin universal itgmania-content-browser-installer-macos-universal"
 echo
 echo "  version-stamped artifacts:"
@@ -135,11 +141,14 @@ for entry in "${targets[@]}" "$UNIVERSAL"; do
   [ -f "$OUT/$name" ] || continue
   versioned="${name/itgmania-content-browser-installer-/itgmania-content-browser-installer-${VERSION}-}"
   mv "$OUT/$name" "$OUT/$versioned"
-  echo "    $versioned"
   case "$goos" in
     linux|darwin)
       go run ./tools/mktarball -in "$OUT/$versioned" -out "$OUT/$versioned.tar.gz" >/dev/null
+      rm -f "$OUT/$versioned"
       echo "    $versioned.tar.gz  (mode 0755)"
+      ;;
+    *)
+      echo "    $versioned"
       ;;
   esac
 done

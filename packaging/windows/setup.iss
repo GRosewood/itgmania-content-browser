@@ -88,6 +88,83 @@ var
   DetectedDir: String;
   DetectRan: Boolean;
 
+// ---------------------------------------------------------------------
+// Maintenance: what to do when it is already installed.
+//
+// Windows puts an uninstall entry in Apps & Features, and that has always
+// worked -- but nobody looks there. People run the setup they downloaded and
+// expect it to offer removal, and this one only ever offered to install again.
+// So a previous install now gets a page with the choice on it.
+var
+  MaintPage: TInputOptionWizardPage;
+  PrevUninstaller: String;
+  Removing: Boolean;
+
+// FindPreviousUninstaller returns the uninstall program of an existing install,
+// or an empty string. Both hives are asked because PrivilegesRequired can be
+// overridden on the command line, so an install may have been made either way.
+function FindPreviousUninstaller(): String;
+var
+  Key, Cmd: String;
+  Roots: array[0..2] of Integer;
+  I: Integer;
+begin
+  Result := '';
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8E4A2F6C-3B71-4D2E-9C55-7A1E0B9D4F32}_is1';
+  Roots[0] := HKEY_CURRENT_USER;
+  Roots[1] := HKEY_LOCAL_MACHINE;
+  Roots[2] := HKEY_LOCAL_MACHINE_32;
+  for I := 0 to 2 do
+  begin
+    if RegQueryStringValue(Roots[I], Key, 'UninstallString', Cmd) then
+    begin
+      Cmd := RemoveQuotes(Trim(Cmd));
+      // A registry entry left by a half-removed install names a program that
+      // is no longer there; offering to run it would be offering nothing.
+      if (Cmd <> '') and FileExists(Cmd) then
+      begin
+        Result := Cmd;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+procedure InitializeWizard();
+begin
+  PrevUninstaller := FindPreviousUninstaller();
+  if PrevUninstaller = '' then
+    Exit;
+
+  MaintPage := CreateInputOptionPage(wpWelcome,
+    'ITGMania Content Browser is already installed',
+    'What would you like to do?',
+    'Choose an option, then click Next.',
+    True, False);
+  MaintPage.Add('Update or repair the installation');
+  MaintPage.Add('Remove ITGMania Content Browser from this computer');
+  MaintPage.SelectedValueIndex := 0;
+end;
+
+// RunPreviousUninstaller removes the existing install and reports whether it
+// went. Silent, because the choice was already made a page ago and a second
+// wizard asking the same question is not a confirmation, it is a nuisance.
+function RunPreviousUninstaller(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(PrevUninstaller, '/SILENT /SUPPRESSMSGBOXES /NORESTART',
+                 '', SW_SHOW, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// The wizard is closed from script after a removal, and the usual "Exit Setup?"
+// confirmation would be asking whether the user meant the thing they just did.
+procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
+begin
+  if Removing then
+    Confirm := False;
+end;
+
 // LooksLikeITGmania mirrors the console installer's check: a Themes folder
 // next to another ITGmania marker.
 function LooksLikeITGmania(Path: String): Boolean;
@@ -162,6 +239,25 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+
+  if (MaintPage <> nil) and (CurPageID = MaintPage.ID) and
+     (MaintPage.SelectedValueIndex = 1) then
+  begin
+    if RunPreviousUninstaller() then
+      MsgBox('ITGMania Content Browser has been removed.' + #13#10 + #13#10 +
+             'The "Find Content" entry is gone from the ITGmania title menu. ' +
+             'Your songs and packs were not touched.', mbInformation, MB_OK)
+    else
+      MsgBox('The uninstaller did not finish.' + #13#10 + #13#10 +
+             'You can remove it from Settings > Apps instead.', mbError, MB_OK);
+
+    // Nothing left for this wizard to do either way.
+    Removing := True;
+    Result := False;
+    PostMessage(WizardForm.Handle, $0010 { WM_CLOSE }, 0, 0);
+    Exit;
+  end;
+
   if CurPageID = wpSelectDir then
   begin
     if not LooksLikeITGmania(WizardDirValue) then

@@ -26,6 +26,7 @@ local Upstream          = CB.Upstream
 local PackTypeOf        = CB.PackTypeOf
 local RAGEFILE_READ     = CB.RAGEFILE_READ
 local RAGEFILE_WRITE    = CB.RAGEFILE_WRITE
+local AbandonSearch     = CB.AbandonSearch
 local Refresh           = CB.Refresh
 local RowFromCatalog    = CB.RowFromCatalog
 local Trim              = CB.Trim
@@ -850,6 +851,7 @@ end
 local function EnterLevelView(bucket)
 	state.mode = bucket
 	state.zone = "list"
+	AbandonSearch()
 	state.search = ""
 	state.viewYear = nil
 

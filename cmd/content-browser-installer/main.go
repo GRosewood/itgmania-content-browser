@@ -354,30 +354,25 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	// browser still works, only deletion is off" stopped being true when the
 	// relay landed. Say what is actually at stake, and say plainly when the
 	// thing meant to start it will not.
+	// One line, not a report.
+	//
+	// The helper is an implementation detail: which mechanism registered it,
+	// where the unit file went, what that mechanism needs before it fires --
+	// none of it is actionable while it is working, and all of it buried the
+	// one thing that is. -check still prints the whole picture for when it is
+	// NOT working, which is when somebody actually wants it.
 	switch {
 	case res.Helper.Err != nil:
 		fmt.Printf("  Local helper:   FAILED (%v)\n", res.Helper.Err)
 		fmt.Println("    The browser reaches the internet through it, so it will not open.")
+		fmt.Println("    Run this installer with -check for the details.")
+	case res.Helper.Running && installer.GameWatchSupported():
+		fmt.Println("  Local helper:   installed and running (it opens its socket when ITGmania does)")
 	case res.Helper.Running:
-		fmt.Println("  Local helper:   running")
+		fmt.Println("  Local helper:   installed and running")
 	default:
 		fmt.Println("  Local helper:   installed, but not running yet")
-	}
-	printAutostart(installer.AutostartInfo(inst))
-
-	// A cabinet that boots into the game never logs in, so the registration
-	// above never fires there. Say when the game's own launcher was used
-	// instead -- it is the thing that makes it work on those machines, and it
-	// is somebody's boot path, so it should not happen silently.
-	switch {
-	case res.Helper.LauncherErr != nil:
-		fmt.Printf("    could not add it to the game launcher: %v\n", res.Helper.LauncherErr)
-	case res.Helper.LauncherChanged:
-		fmt.Printf("    also started from %s\n", res.Helper.Launcher)
-		fmt.Println("      (this machine launches the game from there; a backup of the")
-		fmt.Println("       original is beside it)")
-	case res.Helper.Launcher != "":
-		fmt.Printf("    also started from %s\n", res.Helper.Launcher)
+		fmt.Println("    Run this installer with -check for the details.")
 	}
 
 	// Say which of the three things is wrong. The old message covered a
@@ -497,6 +492,10 @@ func runCheck(target string) int {
 		fmt.Println("    Re-run this installer.")
 	case installer.HelperRunning(inst):
 		fmt.Println("  Local helper:   running and answering on loopback")
+	case installer.HelperWaiting(inst):
+		fmt.Println("  Local helper:   running, waiting for ITGmania to start")
+		fmt.Println("    It opens its loopback socket when the game does and gives")
+		fmt.Println("    it up when the game closes, so nothing is listening now.")
 	default:
 		problems++
 		fmt.Println("  Local helper:   installed, but NOT ANSWERING")

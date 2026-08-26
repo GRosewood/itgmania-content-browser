@@ -17,6 +17,7 @@ local EnsureRecentIndex = CB.EnsureRecentIndex
 local FetchPacks        = CB.FetchPacks
 local PackTypeOf        = CB.PackTypeOf
 local RecentIndexStep   = CB.RecentIndexStep
+local AbandonSearch     = CB.AbandonSearch
 local Refresh           = CB.Refresh
 local YEAR_SPAN         = CB.YEAR_SPAN
 local state             = CB.state
@@ -85,6 +86,7 @@ local function SelectYear(year)
 			end
 		end
 	end
+	AbandonSearch()
 	state.search = ""
 	state.localRows = YearRows(year)
 	state.page = 1
@@ -106,6 +108,7 @@ end
 local function EnterYearView()
 	state.mode = "year"
 	state.zone = "years"
+	AbandonSearch()
 	state.search = ""
 	state.yearFloor = CurrentYear() - (YEAR_SPAN - 1)
 	EnsureRecentIndex()

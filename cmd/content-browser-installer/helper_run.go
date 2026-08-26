@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -153,6 +154,15 @@ func runHelper(target, manifestURL string) int {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		updates.State(ctx)
+
+		// That fetch is the most expensive thing this process ever does when
+		// no game is running: a TLS handshake drags in the system certificate
+		// pool, and on a machine that watches for the game the next thing that
+		// happens is hours of doing nothing while holding it. Handing the
+		// pages back here is worth about forty megabytes of resident memory.
+		if installer.GameWatchSupported() {
+			debug.FreeOSMemory()
+		}
 	}()
 	srv.SetUpdater(helper.Updater{
 		State: func() any {
@@ -200,10 +210,62 @@ func runHelper(target, manifestURL string) int {
 		srv.Close()
 	}()
 
-	fmt.Printf("helper listening on 127.0.0.1:%d for %s\n", srv.Port(), inst.Root)
+	// Where the game's comings and goings can be watched, the socket follows
+	// them. Nothing is bound between games: no port open on the machine, no
+	// config file pointing at one, and no preview cache on disk for a browser
+	// that is not running. What is left is a parked process -- which is what
+	// has to stay, because nothing on Windows can start one when the game does.
+	if installer.GameWatchSupported() {
+		srv.Pause()
+		previews.Clear()
+		go watchForGame(inst, srv, previews, done)
+		fmt.Printf("helper waiting for ITGmania at %s\n", inst.Root)
+	} else {
+		fmt.Printf("helper listening on 127.0.0.1:%d for %s\n", srv.Port(), inst.Root)
+	}
 	if err := srv.Serve(); err != nil {
 		fmt.Fprintf(os.Stderr, "helper: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// watchForGame binds the loopback socket for as long as ITGmania is running
+// and gives it up in between.
+//
+// Both halves of the wait are the cheapest the platform offers: a process
+// snapshot every few seconds to notice a start, then a wait on the process
+// handle -- which costs nothing at all while it blocks -- to notice the end.
+// So the polling half only runs while the game is not, which is when the
+// machine has room for it; and the game takes far longer to reach a menu than
+// the poll takes to see it, so the socket is up before anything asks.
+func watchForGame(inst installer.Install, srv *helper.Server, previews *preview.Fetcher, done <-chan struct{}) {
+	for {
+		pid, ok := installer.WaitForGame(inst, done)
+		if !ok {
+			return // the helper is shutting down
+		}
+		if err := srv.Resume(); err != nil {
+			fmt.Fprintf(os.Stderr, "helper: %v\n", err)
+			return
+		}
+		fmt.Printf("helper listening on 127.0.0.1:%d for %s\n", srv.Port(), inst.Root)
+
+		installer.WaitForGameExit(pid)
+		select {
+		case <-done:
+			return
+		default:
+		}
+
+		srv.Pause()
+		// Previews are refetchable bytes belonging to a browser that has just
+		// gone away with the game. Holding megabytes of extracted audio for a
+		// screen nobody can open is the sort of thing this is trying not to do.
+		previews.Clear()
+		// And hand the pages back rather than sit on a heap sized for work
+		// that is over: this process is about to be idle for hours.
+		debug.FreeOSMemory()
+		fmt.Printf("helper waiting for ITGmania at %s\n", inst.Root)
+	}
 }

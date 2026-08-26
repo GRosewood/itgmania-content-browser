@@ -55,13 +55,43 @@ func preference(saveDir, key string) string {
 // both are read. The read-only variant is deliberately not read: it is mounted
 // read-only precisely so nothing writes to it.
 func AdditionalSongDirs(inst Install) []string {
+	return prefDirs(inst, "", "AdditionalSongFoldersWritable", "AdditionalSongFolders")
+}
+
+// AdditionalRootDirs lists the extra trees mounted at the top of the game's
+// filesystem, with "/Songs" appended -- because that is where a pack inside one
+// of them lives.
+//
+// The engine mounts the two kinds at different points (StepMania.cpp):
+//
+//	MountFolders("dir", AdditionalFoldersWritable,     "/")
+//	MountFolders("dir", AdditionalSongFoldersWritable, "/Songs")
+//
+// So an "additional song folder" holds packs directly, while an "additional
+// folder" is a whole second game tree and its packs sit one level in, under
+// Songs/. Only the first was ever looked at, so a pack on a drive mounted the
+// second way could be seen in the browser -- the engine merges both into
+// /Songs -- and then not be found when it came to deleting it.
+//
+// The read-only variants are deliberately absent from both: the player mounted
+// those read-only, and nothing here should be deleting out of them.
+func AdditionalRootDirs(inst Install) []string {
+	return prefDirs(inst, "Songs", "AdditionalFoldersWritable", "AdditionalFolders")
+}
+
+// prefDirs reads comma-separated directories out of the named preferences,
+// optionally appending a subdirectory, and keeps the ones that exist.
+func prefDirs(inst Install, sub string, keys ...string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, key := range []string{"AdditionalSongFoldersWritable", "AdditionalSongFolders"} {
+	for _, key := range keys {
 		for _, raw := range strings.Split(preference(inst.SaveDir, key), ",") {
-			p := strings.TrimSpace(raw)
+			p := expandHome(strings.TrimSpace(raw), inst)
 			if p == "" {
 				continue
+			}
+			if sub != "" {
+				p = filepath.Join(p, sub)
 			}
 			abs, err := filepath.Abs(p)
 			if err != nil || seen[abs] || !isDir(abs) {
@@ -72,6 +102,29 @@ func AdditionalSongDirs(inst Install) []string {
 		}
 	}
 	return out
+}
+
+// expandHome turns a leading ~ into the home of the account that plays. A path
+// typed into the game's own options screen can carry one, and filepath.Abs
+// would otherwise make a directory literally named "~".
+func expandHome(p string, inst Install) string {
+	if p == "" || p[0] != '~' {
+		return p
+	}
+	home := inst.GameUser.Home
+	if home == "" {
+		home = homeDir()
+	}
+	if home == "" {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if len(p) > 1 && (p[1] == '/' || p[1] == filepath.Separator) {
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
 
 // Writable reports whether a directory can actually be written to. Being
@@ -88,15 +141,50 @@ func Writable(dir string) bool {
 	return true
 }
 
+// InstallRoots lists where a newly downloaded pack could be written, best
+// first: the folders the player configured, then the install's own Songs.
+//
+// It is the write-side twin of SongRoots, and the two are deliberately built
+// from the same pair of preferences. They drifted once -- deletion learned
+// about trees mounted at the game's root and downloading did not -- and the
+// result was a player who could see a pack on their drive, delete it, and not
+// download one back to the same place. A shared shape is what keeps the two
+// answers about "where do packs live" from disagreeing again.
+//
+// The order differs from SongRoots on purpose. Looking for a pack, the
+// install's own Songs comes first because that is where most of them are.
+// Choosing where to PUT one, a configured folder wins: a player who set one did
+// so to say where their library belongs.
+func InstallRoots(inst Install) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	// "put songs here", the more specific of the two
+	for _, dir := range AdditionalSongDirs(inst) {
+		add(dir)
+	}
+	// ...then the Songs/ of a whole tree mounted at the game's root, which the
+	// engine merges into /Songs just the same
+	for _, dir := range AdditionalRootDirs(inst) {
+		add(dir)
+	}
+	return out
+}
+
 // InstallRoot is where a newly downloaded pack should be written.
 //
-// A configured additional folder wins over <install>/Songs, because a player
-// who configured one did so to say where their library lives. The first one
-// that can actually be written to is taken; if none can, the install's own
-// Songs directory is the fallback, and if that cannot be written either the
-// caller is told rather than finding out halfway through an unzip.
+// The first configured folder that can actually be written to is taken; if none
+// can, the install's own Songs directory is the fallback, and if that cannot be
+// written either the caller is told rather than finding out halfway through an
+// unzip.
 func InstallRoot(inst Install) (string, error) {
-	for _, dir := range AdditionalSongDirs(inst) {
+	for _, dir := range InstallRoots(inst) {
 		if Writable(dir) {
 			return dir, nil
 		}

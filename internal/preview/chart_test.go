@@ -327,7 +327,7 @@ func TestChartsHandlesCRLF(t *testing.T) {
 		t.Errorf("style = %q, which is not a four-panel style", got[0].style)
 	}
 	var count int
-	measureNotes(got[0].notes, 4, func(float64, int, int) { count++ })
+	measureNotes(got[0].notes, 4, func(float64, int, int, int) { count++ })
 	if count != 4 {
 		t.Errorf("counted %d notes in a CRLF file, want 4", count)
 	}
@@ -343,7 +343,7 @@ type emitted struct {
 
 func collectNotes(data string, lanes int) []emitted {
 	var out []emitted
-	measureNotes(data, lanes, func(beat float64, cols, quant int) {
+	measureNotes(data, lanes, func(beat float64, cols, _, quant int) {
 		out = append(out, emitted{beat, cols, quant})
 	})
 	return out
@@ -404,10 +404,14 @@ func TestChartMeasureNotes(t *testing.T) {
 			want:  []emitted{{0, 1, 0}, {1, 1, 0}},
 		},
 		{
-			name:  "mines and lifts and fakes are not notes",
+			// A lift IS a note -- the foot has to be on the panel to leave it --
+			// and it is reported in the lift mask as well, which this collector
+			// drops. Mines and fakes stay out: one is to be avoided and the
+			// other is not stepped on at all.
+			name:  "a lift is a note; mines and fakes are not",
 			data:  "M000\nL000\nF000\n0000",
 			lanes: 4,
-			want:  nil,
+			want:  []emitted{{1, 1, 0}},
 		},
 		{
 			name:  "hold ends alone are not notes",
@@ -858,5 +862,53 @@ func TestChartsAgainstInstalledSongs(t *testing.T) {
 	t.Logf("read %d simfiles, %d had a dance chart, %d notes in the sample windows", parsed, withCharts, notes)
 	if withCharts < 10 {
 		t.Errorf("only %d of %d simfiles produced a chart, which is too few to have tested anything", withCharts, parsed)
+	}
+}
+
+// A lift is stepped on like a tap and drawn unlike one: every noteskin has its
+// own Lift graphic because the foot leaves the panel rather than arriving on
+// it. Counting them as nothing at all meant a chart written in lifts previewed
+// as an empty one.
+// liftRow is what a row looks like when the lift mask matters.
+type liftRow struct{ cols, lift int }
+
+func collectLifts(data string, lanes int) []liftRow {
+	var out []liftRow
+	measureNotes(data, lanes, func(_ float64, cols, lifts, _ int) {
+		out = append(out, liftRow{cols, lifts})
+	})
+	return out
+}
+
+func TestChartMeasureNotesCountsLiftsApartFromTaps(t *testing.T) {
+	// four rows: a tap, a lift, both together, and a mine on its own
+	data := `1000
+0L00
+1L00
+00M0
+`
+	got := collectLifts(data, 4)
+	if len(got) != 3 {
+		t.Fatalf("got %d rows, want 3 (the mine-only row is not a note)", len(got))
+	}
+	if got[0].cols != 0b0001 || got[0].lift != 0 {
+		t.Errorf("tap row: cols=%04b lift=%04b, want cols=0001 lift=0000", got[0].cols, got[0].lift)
+	}
+	if got[1].cols != 0b0010 || got[1].lift != 0b0010 {
+		t.Errorf("lift row: cols=%04b lift=%04b, want both 0010", got[1].cols, got[1].lift)
+	}
+	if got[2].cols != 0b0011 || got[2].lift != 0b0010 {
+		t.Errorf("mixed row: cols=%04b lift=%04b, want cols=0011 lift=0010", got[2].cols, got[2].lift)
+	}
+}
+
+// A mine is still not a note: it is a thing to avoid, and drawing one as a
+// step would be worse than leaving it out.
+func TestChartMeasureNotesStillIgnoresMines(t *testing.T) {
+	mines := `M000
+0M00
+`
+	if got := collectLifts(mines, 4); len(got) != 0 {
+		t.Fatalf("mines produced %d rows, want 0", len(got))
 	}
 }

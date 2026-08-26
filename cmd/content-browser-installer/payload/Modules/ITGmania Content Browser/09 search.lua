@@ -425,6 +425,20 @@ end
 -- -----------------------------------------------------------------------
 -- What the parts after this one use.
 
+-- Give up on whatever the search was doing.
+--
+-- A search fans out into several requests that publish as each one lands, and
+-- they are kept honest by a generation counter -- but only a NEWER search ever
+-- bumped it. Walking away from the search instead (a filter tab, a level view,
+-- a year, leaving the browser) left every one of those requests still holding
+-- the current generation, so the next one to land republished its results over
+-- whatever list had replaced it. The keyboard tab filling up with search
+-- results a second after you got there is exactly that.
+local function AbandonSearch()
+	state.searchGen = (state.searchGen or 0) + 1
+end
+
+CB.AbandonSearch     = AbandonSearch
 CB.RowFromCatalog    = RowFromCatalog
 CB.RunSearch         = RunSearch
 CB.SearchIndexLanded = SearchIndexLanded

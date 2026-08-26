@@ -353,6 +353,17 @@ function CB.Screen.ChartWindow(ui, detail)
 	local skinNote = LO.NoteActor("Left", "Tap Note") ~= nil
 	Snd.skinNotes = skinNote
 
+	-- A lift is its own element in every noteskin that has one -- "Tap Lift",
+	-- beside "Tap Note" -- so the right way to draw one is to ask the skin for
+	-- it rather than to dress a tap up as one. Skins that predate lifts do not
+	-- answer, and those fall back below.
+	--
+	-- Only worth a pool when the skin draws taps too: the fallback art shows a
+	-- lift by hollowing the arrow it already has, at no cost in actors.
+	local skinLift = skinNote and LO.NoteActor("Left", "Tap Lift") ~= nil
+	Snd.skinLifts = skinLift
+	Snd.liftsAF = {}
+
 	for lane = 1, 8 do
 		local column = COLUMN[((lane - 1) % 4) + 1]
 		Snd.notesAF[lane] = {}
@@ -374,6 +385,27 @@ function CB.Screen.ChartWindow(ui, detail)
 						self:rotationz(Snd.LaneRot(lane)):visible(false)
 					end,
 				}
+			end
+		end
+	end
+
+	-- One lift actor per tap actor, because a slot holds either a tap or a lift
+	-- and never both: the pair is what makes the choice per column free at draw
+	-- time, and only one of the two is ever visible.
+	if skinLift then
+		for lane = 1, 8 do
+			local column = COLUMN[((lane - 1) % 4) + 1]
+			Snd.liftsAF[lane] = {}
+			for slot = 1, Snd.LANE_POOL do
+				local lift = LO.NoteActor(column, "Tap Lift")
+				if lift then
+					chartWin[#chartWin+1] = lift .. {
+						InitCommand = function(self)
+							Snd.liftsAF[lane][slot] = self
+							self:zoom(Snd.MINI):visible(false)
+						end,
+					}
+				end
 			end
 		end
 	end
@@ -521,9 +553,11 @@ function CB.Screen.ChartWindow(ui, detail)
 				local accent = AccentColor()
 				for lane = 1, 8 do
 					local pool, edges = Snd.notesAF[lane], Snd.edgeAF[lane]
+					local lifts = Snd.liftsAF[lane]
 					for slot = 1, Snd.LANE_POOL do
 						if pool and pool[slot] then pool[slot]:visible(false) end
 						if edges and edges[slot] then edges[slot]:visible(false) end
+						if lifts and lifts[slot] then lifts[slot]:visible(false) end
 					end
 
 					local rec = Snd.receptors[lane]
@@ -662,8 +696,25 @@ function CB.Screen.ChartWindow(ui, detail)
 						local slot = used[lane] + 1
 						local arrow = Snd.notesAF[lane] and Snd.notesAF[lane][slot]
 						local edge = Snd.edgeAF[lane] and Snd.edgeAF[lane][slot]
+						local lift = Snd.liftsAF[lane] and Snd.liftsAF[lane][slot]
+						local isLift = Snd.IsLift(note, lane)
 						local x = Snd.LaneX(lane, CW_MID)
-						if arrow then
+						-- The two share a slot, so whichever is not drawing
+						-- has to be put away right here. Leaving it to the
+						-- sweep below would be too late: that one clears from
+						-- the last used slot on, and this slot is in use.
+						if lift then lift:visible(false) end
+						if isLift and lift then
+							used[lane] = slot
+							if arrow then arrow:visible(false) end
+							lift:visible(true)
+							lift:xy(x, y)
+							-- No quantization slide. A skin draws its lift as one
+							-- fixed frame of the very strip a tap is coloured out
+							-- of, so sliding it would land on a neighbouring
+							-- graphic -- and a lift has no colour of its own to
+							-- go looking for anyway.
+						elseif arrow then
 							used[lane] = slot
 							arrow:visible(true)
 							arrow:xy(x, y)
@@ -674,15 +725,28 @@ function CB.Screen.ChartWindow(ui, detail)
 								arrow:texturetranslate(Snd.QuantSlide(note))
 							else
 								local tint = Snd.QuantColor(note)
-								arrow:diffuse(tint[1], tint[2], tint[3], 1)
+								-- With no lift art to reach for, the arrow is
+								-- drawn hollow instead: the body faded right
+								-- back, the line around it left to carry the
+								-- colour. It reads as the thing you let go of
+								-- rather than the thing you press, which is the
+								-- whole of the distinction.
+								local body = isLift and 0.22 or 1
+								arrow:diffuse(tint[1], tint[2], tint[3], body)
 							end
 						end
 						if edge then
 							-- the fallback arrow's inner line, white at every
-							-- quantization
+							-- quantization -- except around a hollowed lift,
+							-- where it is the only part left to carry one
 							edge:visible(true)
 							edge:xy(x, y)
-							edge:diffuse(1, 1, 1, 0.93)
+							if isLift then
+								local tint = Snd.QuantColor(note)
+								edge:diffuse(tint[1], tint[2], tint[3], 1)
+							else
+								edge:diffuse(1, 1, 1, 0.93)
+							end
 						end
 					end
 				end
@@ -690,9 +754,11 @@ function CB.Screen.ChartWindow(ui, detail)
 			end
 			for lane = 1, 8 do
 				local pool, edges = Snd.notesAF[lane], Snd.edgeAF[lane]
+				local lifts = Snd.liftsAF[lane]
 				for slot = used[lane] + 1, Snd.LANE_POOL do
 					if pool and pool[slot] then pool[slot]:visible(false) end
 					if edges and edges[slot] then edges[slot]:visible(false) end
+					if lifts and lifts[slot] then lifts[slot]:visible(false) end
 				end
 			end
 

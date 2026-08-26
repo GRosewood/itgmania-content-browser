@@ -24,6 +24,7 @@ import (
 type Note struct {
 	T    float64 `json:"t"` // seconds from the start of the sample window
 	Cols int     `json:"c"` // one bit per column, lowest bit leftmost
+	Lift int     `json:"l"` // of those columns, the ones that are lifts
 	Q    int     `json:"q"` // quantization: 0=4th 1=8th 2=12th 3=16th 4=24th 5=32nd 6=48th 7=other
 }
 
@@ -309,9 +310,15 @@ func charts(text string) []chart {
 }
 
 // measureNotes walks the measure data and calls emit for every row that has
-// something to step on. Taps, hold heads and roll heads all count; mines and
-// lifts do not, because neither is a thing arriving at the receptor.
-func measureNotes(data string, lanes int, emit func(beat float64, cols, quant int)) {
+// something to step on. Taps, hold heads, roll heads and lifts all count;
+// mines do not, because a mine is a thing to avoid rather than to hit.
+//
+// Lifts are reported separately from the rest. They are stepped on like a tap
+// -- the foot has to be there -- but released rather than pressed, and every
+// noteskin draws them differently for exactly that reason. Folding them in
+// with taps drew them as taps; leaving them out, which is what this did,
+// showed a chart full of lifts as an empty one.
+func measureNotes(data string, lanes int, emit func(beat float64, cols, lifts, quant int)) {
 	for measure, block := range strings.Split(data, ",") {
 		rows := make([]string, 0, 16)
 		for _, line := range strings.Split(block, "\n") {
@@ -325,18 +332,21 @@ func measureNotes(data string, lanes int, emit func(beat float64, cols, quant in
 			continue
 		}
 		for index, row := range rows {
-			cols := 0
+			cols, lifts := 0, 0
 			for lane := 0; lane < lanes && lane < len(row); lane++ {
 				switch row[lane] {
 				case '1', '2', '4':
 					cols |= 1 << uint(lane)
+				case 'L', 'l':
+					cols |= 1 << uint(lane)
+					lifts |= 1 << uint(lane)
 				}
 			}
 			if cols == 0 {
 				continue
 			}
 			beat := float64(measure)*4 + float64(index)*4/float64(len(rows))
-			emit(beat, cols, quantize(index, len(rows)))
+			emit(beat, cols, lifts, quantize(index, len(rows)))
 		}
 	}
 }
@@ -367,7 +377,7 @@ func chartsForWindow(text string, from, length float64) []ChartData {
 			continue
 		}
 		var notes []Note
-		measureNotes(c.notes, lanes, func(beat float64, cols, quant int) {
+		measureNotes(c.notes, lanes, func(beat float64, cols, lifts, quant int) {
 			if len(notes) >= maxNotes {
 				return
 			}
@@ -375,7 +385,7 @@ func chartsForWindow(text string, from, length float64) []ChartData {
 			if at < from || at > until {
 				return
 			}
-			notes = append(notes, Note{T: at - from, Cols: cols, Q: quant})
+			notes = append(notes, Note{T: at - from, Cols: cols, Lift: lifts, Q: quant})
 		})
 		out = append(out, ChartData{
 			Style: c.style, Diff: c.diff, Meter: c.meter,

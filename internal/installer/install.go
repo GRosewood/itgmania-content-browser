@@ -298,16 +298,43 @@ func Uninstall(inst Install, files ModuleFiles) ([]string, error) {
 		return removed, err
 	}
 
-	// The parts folder goes wholesale, not just file by file. The walk above
-	// removes what THIS payload ships, but the in-game updater never deletes
-	// anything, so a machine that has been through a release which renamed a
-	// part still holds the old name -- and a folder emptied of everything
-	// except orphans would survive its own uninstall forever. The folder is
-	// wholly this project's, by name, so taking all of it is taking ours.
-	partsDir := filepath.Join(modulesDir, "ITGmania Content Browser")
-	if isDir(partsDir) {
-		if rmErr := os.RemoveAll(partsDir); rmErr == nil {
-			removed = append(removed, "ITGmania Content Browser"+string(filepath.Separator)+" (leftover parts)")
+	// These folders go wholesale, not just file by file. The walk above removes
+	// what THIS payload ships, and that is not the same as what is there: the
+	// in-game updater never deletes anything, and the uninstaller the Windows
+	// wizard runs is the copy bundled when setup.exe was last run, so its idea
+	// of the payload can be several releases old. Either way a folder emptied of
+	// everything except names nobody remembers would survive its own uninstall
+	// forever. Both are wholly this project's, by name, so taking all of them is
+	// taking ours.
+	for _, name := range []string{"ITGmania Content Browser", "ContentBrowserIcons"} {
+		dir := filepath.Join(modulesDir, name)
+		if !isDir(dir) {
+			continue
+		}
+		if rmErr := os.RemoveAll(dir); rmErr == nil {
+			removed = append(removed, name+string(filepath.Separator)+" (leftovers)")
+		}
+	}
+
+	// The browser's own working data: the helper's folder beside Save, and the
+	// preview and banner cache. Neither holds a file the payload ships, so
+	// neither was ever reached by the walk -- an uninstall left behind the list
+	// of installed dates and however many megabytes of downloaded artwork, which
+	// is not what "remove the module files" means to anybody.
+	//
+	// RemoveHelperBinary above has already waited for the helper to let go of
+	// its executable, so by here the directory can actually be taken.
+	if dir := HelperDir(inst); isDir(dir) {
+		if rmErr := os.RemoveAll(dir); rmErr == nil {
+			removed = append(removed, dir)
+		}
+	}
+	if cache, cacheErr := CacheDir(inst); cacheErr == nil {
+		dir := filepath.Join(cache, "ITGmaniaContentBrowser")
+		if isDir(dir) {
+			if rmErr := os.RemoveAll(dir); rmErr == nil {
+				removed = append(removed, dir)
+			}
 		}
 	}
 	return removed, nil

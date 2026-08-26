@@ -25,6 +25,7 @@ local IsoFromLongDate    = CB.IsoFromLongDate
 local LEVEL              = CB.LEVEL
 local MonthsAgoStr       = CB.MonthsAgoStr
 local REFRESH_SECS       = CB.REFRESH_SECS
+local AbandonSearch      = CB.AbandonSearch
 local Refresh            = CB.Refresh
 local RowFromCatalog     = CB.RowFromCatalog
 local Toast              = CB.Toast
@@ -286,6 +287,7 @@ ApplyFilterRefetch = function(quiet)
 	-- it instant instead of a fresh round of requests behind a row of spinners.
 	--
 	-- a filter change means a different result set; drop any search or year view
+	AbandonSearch()
 	state.localRows = nil
 	state.search = ""
 	state.viewYear = nil

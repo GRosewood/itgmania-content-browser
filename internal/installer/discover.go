@@ -57,16 +57,20 @@ func (i Install) ModuleThemeDir() string {
 	// CurrentTheme, not preference(): a per-game override beats the global
 	// Theme key, and the override is what the running game actually loads.
 	if current := CurrentTheme(i.SaveDir); current != "" {
-		dir := filepath.Join(i.ThemesDir, current)
-		if has(dir) {
-			return dir
+		for _, root := range ThemeRoots(i) {
+			if dir := filepath.Join(root, current); has(dir) {
+				return dir
+			}
 		}
 	}
-	entries, err := os.ReadDir(i.ThemesDir)
-	if err == nil {
+	for _, root := range ThemeRoots(i) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
-			if e.IsDir() && has(filepath.Join(i.ThemesDir, e.Name())) {
-				return filepath.Join(i.ThemesDir, e.Name())
+			if e.IsDir() && has(filepath.Join(root, e.Name())) {
+				return filepath.Join(root, e.Name())
 			}
 		}
 	}
@@ -80,32 +84,50 @@ func (i Install) SimplyLoveDir() string {
 	if i.ThemeDir != "" {
 		return i.ThemeDir
 	}
-	// The theme actually in use comes before any match on name.
+	// The theme actually in use comes before any match on name, and it is
+	// looked for in every place the engine loads themes from -- the player's
+	// profile as well as the install.
 	//
-	// An install can hold both "Simply Love" and "Simply Love-SM5", with the
-	// second one switched on. Taking the stock name first put the module into
-	// the theme the player does not load, and nothing said so -- the files
+	// Two things went wrong without this. An install can hold both "Simply
+	// Love" and "Simply Love-SM5" with the second switched on, and taking the
+	// stock name first put the module in the one the player does not load. And
+	// on Linux the game is in /opt, owned by root, so a theme the player added
+	// is in ~/.itgmania/Themes -- which was not searched at all, so the theme
+	// in use could not be found even by name. Both ended the same way: files
 	// landed, the installer reported success, and Find Content never appeared.
 	if cur := CurrentTheme(i.SaveDir); cur != "" {
-		if dir := filepath.Join(i.ThemesDir, cur); isDir(dir) {
-			return dir
+		for _, root := range ThemeRoots(i) {
+			if dir := filepath.Join(root, cur); isDir(dir) {
+				return dir
+			}
 		}
 	}
-	exact := filepath.Join(i.ThemesDir, "Simply Love")
-	if isDir(exact) {
-		return exact
+	var exact string
+	for _, root := range ThemeRoots(i) {
+		candidate := filepath.Join(root, "Simply Love")
+		if exact == "" {
+			exact = candidate
+		}
+		if isDir(candidate) {
+			return candidate
+		}
 	}
-	entries, err := os.ReadDir(i.ThemesDir)
-	if err != nil {
-		return exact
+	if exact == "" {
+		exact = filepath.Join(i.ThemesDir, "Simply Love")
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, root := range ThemeRoots(i) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
 			continue
 		}
-		name := e.Name()
-		if strings.HasPrefix(strings.ToLower(name), "simply love") {
-			return filepath.Join(i.ThemesDir, name)
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasPrefix(strings.ToLower(name), "simply love") {
+				return filepath.Join(root, name)
+			}
 		}
 	}
 	return exact
@@ -265,9 +287,20 @@ func Inspect(root string) (Install, bool) {
 	if !isDir(themes) {
 		return Install{}, false
 	}
-	// Themes/ alone is not enough; require another ITGmania marker.
-	if !isDir(filepath.Join(root, "Data")) && !isDir(filepath.Join(root, "Program")) &&
-		!isDir(filepath.Join(root, "NoteSkins")) {
+	// Themes/ alone is not enough, and neither is a directory that merely
+	// looks like one.
+	//
+	// ITGmania mirrors its whole layout into the player's profile: ~/.itgmania
+	// holds Save/, Cache/, Songs/, Themes/ and NoteSkins/ too. Accepting
+	// "Data or Program or NoteSkins" therefore matched the profile as well as
+	// the install, so a machine with one copy of the game was reported as two
+	// -- and picking the profile gave an empty theme list and the wrong answer
+	// about which theme is in use.
+	//
+	// The game's own desktop entry settles it: TryExec=/opt/itgmania/itgmania.
+	// An install is the thing with the executable in it. A profile has no
+	// executable, and never will.
+	if !hasGameBinary(root) {
 		return Install{}, false
 	}
 
@@ -411,4 +444,40 @@ func Discover() []Install {
 		return found[a].Root < found[b].Root
 	})
 	return found
+}
+
+// hasGameBinary reports whether a directory holds the ITGmania executable.
+//
+// This is what separates an install from the profile ITGmania creates beside
+// it, which carries the same directory names but nothing to run. The game's
+// own .desktop identifies itself the same way, with TryExec pointing at the
+// binary.
+func hasGameBinary(root string) bool {
+	// Windows keeps it in Program/, which is also what its own installer sets
+	// as the executables directory.
+	for _, p := range []string{
+		filepath.Join(root, "Program", "ITGmania.exe"),
+		filepath.Join(root, "Program", "StepMania.exe"),
+		// Linux: the binary sits at the top, beside Themes/.
+		filepath.Join(root, "itgmania"),
+		filepath.Join(root, "itgmania-bin"),
+		filepath.Join(root, "ITGmania"),
+		// macOS: Inspect re-roots onto Contents/Resources, so the executable
+		// is one level up in Contents/MacOS.
+		filepath.Join(root, "..", "MacOS", "ITGmania"),
+	} {
+		if isFile(p) {
+			return true
+		}
+	}
+	// A Program/ directory with any executable in it counts: forks rename the
+	// binary, and the directory only exists in an install.
+	if entries, err := os.ReadDir(filepath.Join(root, "Program")); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".exe") {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -27,12 +27,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -134,8 +136,20 @@ type Server struct {
 	packMods PackModsReader
 	packCred PackCreditsReader
 	space    SpaceReader
-	ln       net.Listener
 	srv      *http.Server
+
+	// The listener comes and goes. On a machine that can tell when ITGmania is
+	// running there is no reason to hold a socket while it is not, so the
+	// listener is dropped and rebound around the game's life while this process
+	// stays put -- rebinding is instant, restarting is not.
+	//
+	// srv outlives all of them on purpose: http.Server.Close is permanent, so
+	// pausing must close the listener and nothing else.
+	mu     sync.Mutex
+	cond   *sync.Cond
+	ln     net.Listener
+	paused bool
+	done   bool
 }
 
 func newToken() (string, error) {
@@ -168,6 +182,7 @@ func New(saveDir, version string, remove Remover, tidy Sweeper) (*Server, error)
 		tidy:    tidy,
 		ln:      ln,
 	}
+	s.cond = sync.NewCond(&s.mu)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
@@ -231,8 +246,15 @@ func (s *Server) SetPackCreditsReader(r PackCreditsReader) { s.packCred = r }
 // SetSpaceReader attaches the free-space check. Call it before Serve.
 func (s *Server) SetSpaceReader(r SpaceReader) { s.space = r }
 
-// Port is the loopback port the service bound.
-func (s *Server) Port() int { return s.ln.Addr().(*net.TCPAddr).Port }
+// Port is the loopback port the service bound, or zero while it holds none.
+func (s *Server) Port() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ln == nil {
+		return 0
+	}
+	return s.ln.Addr().(*net.TCPAddr).Port
+}
 
 // Token is the shared secret the module must present.
 func (s *Server) Token() string { return s.token }
@@ -256,21 +278,180 @@ func (s *Server) publish() error {
 	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
-// Serve blocks until the server is closed.
-func (s *Server) Serve() error {
-	err := s.srv.Serve(s.ln)
-	if err == http.ErrServerClosed {
+// Paused reports whether the server is currently holding no socket.
+func (s *Server) Paused() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.paused
+}
+
+// Pause drops the loopback socket. The process stays; Resume brings it back on
+// a fresh port.
+//
+// The config stays too, republished with a port of zero -- which is a
+// deliberate choice and not a leftover. The module already treats a
+// non-positive port as no helper at all and re-reads until it gets a real one,
+// so the game is told the truth. And the file is what this helper is stopped
+// BY: the uninstaller deletes it, an upgrade publishes its own over it, and in
+// both cases the check that notices runs every two seconds and needs something
+// to read. A helper that withdrew its config would be one nothing could ever
+// tell to go away.
+func (s *Server) Pause() {
+	s.mu.Lock()
+	if s.done || s.paused {
+		s.mu.Unlock()
+		return
+	}
+	ln := s.ln
+	s.ln, s.paused = nil, true
+	s.mu.Unlock()
+
+	if ln != nil {
+		_ = ln.Close()
+	}
+	// Port zero now, since Port() reports what is bound and nothing is -- but
+	// only over a config that is still ours. An upgrade that landed while the
+	// game was running has already published its own, and stamping this
+	// helper's token back over it would have the live one read a foreign token
+	// and shut itself down, leaving the replaced helper as the survivor.
+	//
+	// A config that has gone entirely is left gone: the uninstaller removes it
+	// to stop this process, and writing it back would be refusing to die.
+	s.republishIfOurs()
+}
+
+// Resume binds a fresh loopback port and publishes it.
+//
+// A new port every time, because the old one was given up and asking for it
+// back can fail: something else may have taken it, and a helper that refuses to
+// come back because of that would be a browser that never works again. The
+// config carries the port, and the game reads the config, so nothing depends on
+// it staying the same.
+func (s *Server) Resume() error {
+	s.mu.Lock()
+	if s.done {
+		s.mu.Unlock()
+		return http.ErrServerClosed
+	}
+	if !s.paused && s.ln != nil {
+		s.mu.Unlock()
 		return nil
 	}
-	return err
+	s.mu.Unlock()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("binding loopback: %w", err)
+	}
+
+	s.mu.Lock()
+	if s.done {
+		s.mu.Unlock()
+		_ = ln.Close()
+		return http.ErrServerClosed
+	}
+	old := s.ln
+	s.ln, s.paused = ln, false
+	s.mu.Unlock()
+
+	if old != nil {
+		_ = old.Close()
+	}
+
+	// Coming back is conditional on still being the helper of record. Between
+	// the pause and now the player may have run the installer again, and the
+	// new helper's config is the one the game must find; taking it over here
+	// would leave the game talking to the copy that was replaced.
+	//
+	// The caller stops watching on this error and the two-second check ends
+	// the process shortly after, which is the right outcome: superseded.
+	if cfg, err := ReadConfig(s.saveDir); err != nil || cfg.Token != s.token {
+		s.Pause()
+		return errSuperseded
+	}
+	if err := s.publish(); err != nil {
+		s.Pause()
+		return err
+	}
+	s.cond.Broadcast()
+	return nil
+}
+
+// errSuperseded is Resume's answer when another helper owns the config.
+var errSuperseded = errors.New("another helper has taken over this install")
+
+// republishIfOurs rewrites the config with whatever is bound now, but only when
+// the file on disk is still this helper's.
+func (s *Server) republishIfOurs() {
+	cfg, err := ReadConfig(s.saveDir)
+	if err != nil || cfg.Token != s.token {
+		return
+	}
+	_ = s.publish()
+}
+
+// unpublish removes the config file, but only while it is still ours -- the
+// same care Close takes, and for the same reason.
+func (s *Server) unpublish() {
+	if cfg, err := ReadConfig(s.saveDir); err == nil && cfg.Token == s.token {
+		_ = os.Remove(ConfigPath(s.saveDir))
+	}
+}
+
+// Serve blocks until the server is closed, serving whatever listener it holds
+// and waiting quietly whenever it holds none.
+func (s *Server) Serve() error {
+	for {
+		s.mu.Lock()
+		for s.ln == nil && !s.done {
+			s.cond.Wait()
+		}
+		if s.done {
+			s.mu.Unlock()
+			return nil
+		}
+		ln := s.ln
+		s.mu.Unlock()
+
+		err := s.srv.Serve(ln)
+		if err == http.ErrServerClosed {
+			return nil
+		}
+
+		// Serve only returns for one reason here: the listener stopped
+		// accepting. Pause is the expected cause and means go round again; any
+		// other is the socket itself failing, which is not something to sit
+		// waiting on.
+		s.mu.Lock()
+		paused, done := s.paused, s.done
+		if s.ln == ln {
+			s.ln = nil
+		}
+		s.mu.Unlock()
+		if done {
+			return nil
+		}
+		if !paused {
+			return err
+		}
+	}
 }
 
 // Close stops the server. It unlinks the published config only if that config
 // is still ours: during an upgrade the replacement publishes over us, and
 // deleting its file would take the live helper down with us.
 func (s *Server) Close() error {
-	if cfg, err := ReadConfig(s.saveDir); err == nil && cfg.Token == s.token {
-		os.Remove(ConfigPath(s.saveDir))
+	s.mu.Lock()
+	s.done = true
+	ln := s.ln
+	s.ln = nil
+	s.mu.Unlock()
+	// woken so a Serve parked between games can see that it is over
+	s.cond.Broadcast()
+
+	s.unpublish()
+	if ln != nil {
+		_ = ln.Close()
 	}
 	return s.srv.Close()
 }

@@ -52,6 +52,10 @@ func SongRoots(inst Install) []string {
 	for _, dir := range AdditionalSongDirs(inst) {
 		add(dir)
 	}
+	// ...and the Songs/ inside every extra tree mounted at the game's root.
+	for _, dir := range AdditionalRootDirs(inst) {
+		add(dir)
+	}
 	return out
 }
 
