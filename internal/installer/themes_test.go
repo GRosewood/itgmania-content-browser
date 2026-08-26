@@ -136,7 +136,7 @@ func TestPickThemeDefaultsToTheOneInUse(t *testing.T) {
 	inst := themeFixture(t)
 	setPrefs(t, inst, "[Game-dance]\nTheme=Zarzob Fork\n")
 
-	got, ask, err := PickTheme(Themes(inst), "")
+	got, ask, err := PickTheme(Themes(inst), "", CurrentTheme(inst.SaveDir))
 	if err != nil || ask {
 		t.Fatalf("PickTheme = %v, ask=%v, err=%v", got.Name, ask, err)
 	}
@@ -150,7 +150,7 @@ func TestPickThemeAsksWhenTheChoiceIsAPreference(t *testing.T) {
 	// Nothing in use, and two themes could take it.
 	setPrefs(t, inst, "[Options]\nHttpEnabled=1\n")
 
-	_, ask, err := PickTheme(Themes(inst), "")
+	_, ask, err := PickTheme(Themes(inst), "", CurrentTheme(inst.SaveDir))
 	if err != nil {
 		t.Fatalf("PickTheme: %v", err)
 	}
@@ -164,15 +164,15 @@ func TestPickThemeHonoursAndValidatesAnExplicitName(t *testing.T) {
 	setPrefs(t, inst, "[Game-dance]\nTheme=Zarzob Fork\n")
 	themes := Themes(inst)
 
-	got, ask, err := PickTheme(themes, "simply love") // case-insensitive
+	got, ask, err := PickTheme(themes, "simply love", CurrentTheme(inst.SaveDir)) // case-insensitive
 	if err != nil || ask || got.Name != "Simply Love" {
 		t.Errorf("explicit name: got %q ask=%v err=%v", got.Name, ask, err)
 	}
 
-	if _, _, err := PickTheme(themes, "Some Other Theme"); err == nil {
+	if _, _, err := PickTheme(themes, "Some Other Theme", CurrentTheme(inst.SaveDir)); err == nil {
 		t.Error("accepted a theme the module cannot run under")
 	}
-	if _, _, err := PickTheme(themes, "Nonexistent"); err == nil {
+	if _, _, err := PickTheme(themes, "Nonexistent", CurrentTheme(inst.SaveDir)); err == nil {
 		t.Error("accepted a theme that is not there")
 	}
 }
@@ -187,7 +187,7 @@ func TestPickThemeReportsWhenNothingWillDo(t *testing.T) {
 	writeTheme(t, themes, "Plain Theme", "local t = Def.ActorFrame{}\n", "[ScreenTitleMenu]\nChoice1=\"x\"\n")
 	inst := Install{Root: root, ThemesDir: themes, SaveDir: save}
 
-	if _, _, err := PickTheme(Themes(inst), ""); err == nil {
+	if _, _, err := PickTheme(Themes(inst), "", CurrentTheme(inst.SaveDir)); err == nil {
 		t.Fatal("claimed an install with no usable theme was fine")
 	}
 	if len(CompatibleThemes(inst)) != 0 {

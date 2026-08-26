@@ -28,7 +28,7 @@ const (
 	//
 	// build.sh reads it from here, so bumping this one line is the whole of
 	// cutting a release.
-	Version = "0.5"
+	Version = "0.6"
 
 	// UpdateManifest is where the helper looks to find out whether a newer
 	// module has been published. It is fetched by the helper rather than by

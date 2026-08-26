@@ -211,6 +211,49 @@ func candidateRoots() []string {
 				filepath.Join(home, ".local", "share", "itgmania"),
 			)
 		}
+		// Mounted drives. A cabinet with the game on a second disk is ordinary
+		// -- /mnt/itgmania is a real layout -- and none of the fixed paths
+		// above can guess the mount point, so the mount roots are listed
+		// instead. Only one level down: /mnt and /media hold mount points, not
+		// trees to walk.
+		add(mountedCandidates()...)
+	}
+	return out
+}
+
+// mountedCandidates lists directories one level under the usual mount roots.
+//
+// Inspect rejects anything without a game binary in it, so listing every mount
+// point costs a stat per entry and admits nothing that is not an install. That
+// is a better trade than a fixed list of names, which cannot know what someone
+// called their drive.
+func mountedCandidates() []string {
+	var out []string
+	roots := []string{"/mnt", "/media", "/run/media", "/srv"}
+	if home := homeDir(); home != "" {
+		// /media/<user>/<label> and /run/media/<user>/<label> are what the
+		// desktop automounters produce.
+		if u := filepath.Base(home); u != "" && u != "." && u != string(filepath.Separator) {
+			roots = append(roots, filepath.Join("/media", u), filepath.Join("/run/media", u))
+		}
+	}
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			dir := filepath.Join(root, e.Name())
+			out = append(out, dir)
+			// One more level, for a drive holding the game in a subfolder
+			// rather than at its root.
+			for _, name := range []string{"itgmania", "ITGmania", "Games/itgmania", "Games/ITGmania"} {
+				out = append(out, filepath.Join(dir, filepath.FromSlash(name)))
+			}
+		}
 	}
 	return out
 }

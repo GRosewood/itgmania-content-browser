@@ -79,6 +79,27 @@ func AdditionalRootDirs(inst Install) []string {
 	return prefDirs(inst, "Songs", "AdditionalFoldersWritable", "AdditionalFolders")
 }
 
+// AdditionalThemeDirs lists the Themes/ of every tree the player mounted at
+// the game's root.
+//
+// This is the same mount AdditionalRootDirs reads, one directory along. A tree
+// mounted at "/" puts its Themes/ onto /Themes exactly as it puts its Songs/
+// onto /Songs, so a cabinet whose library lives on a mounted drive can have
+// the theme it is actually running sitting there and nowhere else. Only the
+// install and the player's profile were ever searched, so that theme could not
+// be found -- and the module went into a different copy, or a different theme,
+// while the installer reported success.
+//
+// The read-only variant counts here, unlike in the song folders. Nothing in
+// this package should write into a read-only mount, but a theme on one still
+// loads, and finding it is what stops the module being installed into some
+// other theme instead. Whether the chosen directory can actually be written to
+// is a separate question, asked later, where it can be answered honestly.
+func AdditionalThemeDirs(inst Install) []string {
+	return prefDirs(inst, "Themes",
+		"AdditionalFoldersWritable", "AdditionalFoldersReadOnly", "AdditionalFolders")
+}
+
 // prefDirs reads comma-separated directories out of the named preferences,
 // optionally appending a subdirectory, and keeps the ones that exist.
 func prefDirs(inst Install, sub string, keys ...string) []string {

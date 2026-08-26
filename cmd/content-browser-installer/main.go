@@ -52,7 +52,7 @@ func main() {
 		yesFlag       = flag.Bool("y", false, "do not prompt; use the first detected install")
 		uninstallFlag = flag.Bool("uninstall", false, "remove the module files")
 		listFlag      = flag.Bool("list", false, "list detected ITGmania installations and exit")
-		themeFlag     = flag.String("theme", "", "theme folder to install into (default: the one in use)")
+		themeFlag     = flag.String("theme", "", "theme folder to install into: a name, or a full path when the same name exists in more than one place (default: the one in use)")
 		listThemeFlag = flag.Bool("list-themes", false, "list this install's themes and whether the module can run under them")
 		versionFlag   = flag.Bool("version", false, "print version and exit")
 		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
@@ -186,6 +186,15 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 			fmt.Println()
 			for _, t := range installer.Themes(in) {
 				fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
+				// The directory, always. A theme can live in the install, in
+				// the player's profile, or on a drive mounted through the
+				// game's own options, and the name alone cannot tell those
+				// apart -- which is the whole reason a module ends up in a
+				// copy nobody is running.
+				fmt.Printf("      %s\n", t.Path)
+				for _, other := range t.AlsoIn {
+					fmt.Printf("      also: %s (not loaded)\n", other)
+				}
 			}
 			fmt.Println()
 		}
@@ -204,13 +213,25 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	}
 
 	themes := installer.Themes(inst)
-	theme, ask, err := installer.PickTheme(themes, wantTheme)
+	current := installer.CurrentTheme(inst.SaveDir)
+	theme, ask, err := installer.PickTheme(themes, wantTheme, current)
 	if err != nil {
 		fmt.Printf("  Install:  %s\n\n", inst.Root)
 		listThemeTable(themes)
 		return fail("%v\n"+
 			"  This module is a Simply Love add-on. Any Simply Love fork works,\n"+
 			"  so long as it loads Modules/ and has a title menu to add to.", err)
+	}
+	if current != "" && !installer.ThemeListed(themes, current) {
+		// The game is drawing a theme that is not in any directory searched.
+		// Said whether or not there is a prompt coming, because -y skips the
+		// prompt and this is the one thing that makes the result wrong.
+		fmt.Printf("  This install is set to use %q, which is not in any theme\n", current)
+		fmt.Println("  folder found here. It is probably on a drive mounted through the")
+		fmt.Println("  game's own options; add that folder to AdditionalFoldersWritable")
+		fmt.Println("  (or pass -theme <full path to the theme folder>) so this can see it.")
+		fmt.Println("  Installing into anything else will not be visible in the game.")
+		fmt.Println()
 	}
 	if ask && !assumeYes {
 		// More than one theme here could take it and none of them is the one in
@@ -235,7 +256,15 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	if inst.Version != "" {
 		fmt.Printf("  Version:  ITGmania %s\n", inst.Version)
 	}
-	fmt.Printf("  Theme:    %s\n", theme.Name)
+	// The full path, not just the name. One name can exist in several of the
+	// places the engine mounts, and when the module goes into the wrong copy
+	// nothing else on this screen looks any different.
+	fmt.Printf("  Theme:    %s\n", theme.Path)
+	for _, other := range theme.AlsoIn {
+		fmt.Printf("            (a theme called %q is also in %s; the game loads\n", theme.Name, other)
+		fmt.Printf("             the one above. If it is drawing that one instead, re-run with\n")
+		fmt.Printf("             -theme followed by that full path)\n")
+	}
 	if !theme.Current {
 		// Installing into a theme that is not switched on is legitimate -- people
 		// set one up before moving to it -- but silently doing nothing visible is
@@ -523,6 +552,10 @@ func listThemeTable(themes []installer.Theme) {
 	fmt.Println("  Themes found:")
 	for _, t := range themes {
 		fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
+		fmt.Printf("      %s\n", t.Path)
+		for _, other := range t.AlsoIn {
+			fmt.Printf("      also: %s (not loaded)\n", other)
+		}
 	}
 	fmt.Println()
 }

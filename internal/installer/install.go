@@ -156,6 +156,17 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 		return res, fmt.Errorf("Simply Love theme not found at %s", themeDir)
 	}
 
+	// A theme can be on a drive the player mounted read-only through the game's
+	// own options. It loads from there perfectly well, so it is a legitimate
+	// answer to "which theme is this cabinet running" and the search finds it
+	// -- but nothing can be written into it, and "read-only file system" on its
+	// own does not tell anybody which of the paths on screen was the problem.
+	if readOnlyFS(themeDir) {
+		return res, fmt.Errorf("%s is on a read-only filesystem, so the module"+
+			" cannot be installed into it; remount it writable, or install into"+
+			" a copy of the theme that is not read-only", themeDir)
+	}
+
 	res.ModulesDir = filepath.Join(themeDir, "Modules")
 	if err := os.MkdirAll(res.ModulesDir, 0o755); err != nil {
 		return res, fmt.Errorf("creating %s: %w", res.ModulesDir, err)
