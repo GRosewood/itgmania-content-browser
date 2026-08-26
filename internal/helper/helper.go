@@ -306,6 +306,15 @@ func (s *Server) Pause() {
 	s.ln, s.paused = nil, true
 	s.mu.Unlock()
 
+	// Closing the listener stops this helper being reached ANEW; it does
+	// nothing about connections already established, which stay open and keep
+	// being served. A keep-alive connection is exactly that, and a paused
+	// helper that goes on answering one is not paused.
+	//
+	// This is the documented way to be rid of them: it shuts the idle ones now
+	// and marks the rest to close when their current response is done. Resume
+	// turns it back on.
+	s.srv.SetKeepAlivesEnabled(false)
 	if ln != nil {
 		_ = ln.Close()
 	}
@@ -343,6 +352,7 @@ func (s *Server) Resume() error {
 	if err != nil {
 		return fmt.Errorf("binding loopback: %w", err)
 	}
+	s.srv.SetKeepAlivesEnabled(true)
 
 	s.mu.Lock()
 	if s.done {

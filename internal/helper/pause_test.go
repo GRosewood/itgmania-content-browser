@@ -3,6 +3,7 @@ package helper
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -23,6 +24,11 @@ func newPaused(t *testing.T) (*Server, chan error) {
 }
 
 // health asks the helper whether it is there, the way the game does.
+//
+// Keep-alives are off on purpose. With the shared default transport, an earlier
+// check leaves an idle connection behind and the next one rides it -- so a
+// server whose listener had been closed still answered, and the test that meant
+// to prove the pause works proved only that Go pools sockets.
 func health(t *testing.T, srv *Server, port int) (int, error) {
 	t.Helper()
 	req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/health", port), nil)
@@ -30,12 +36,29 @@ func health(t *testing.T, srv *Server, port int) (int, error) {
 		return 0, err
 	}
 	req.Header.Set("X-Browser-Token", srv.Token())
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	client := &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode, nil
+}
+
+// refused reports whether a fresh TCP connection to that port is refused. This
+// is the question a pause is actually answering -- nothing is listening -- and
+// unlike an HTTP round trip it cannot be satisfied by a pooled socket.
+func refused(port int) bool {
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		return true
+	}
+	_ = c.Close()
+	return false
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -77,9 +100,12 @@ func TestServerServesAgainAfterAPause(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	// and nothing answers on the old port
+	// and nothing is listening on the old port any more
+	if !refused(first) {
+		t.Errorf("port %d still accepted a connection after the pause", first)
+	}
 	if _, err := health(t, srv, first); err == nil {
-		t.Errorf("port %d still answered after the pause", first)
+		t.Errorf("port %d still served a request after the pause", first)
 	}
 
 	if err := srv.Resume(); err != nil {
@@ -338,5 +364,47 @@ func TestResumeStandsDownWhenTheConfigIsGone(t *testing.T) {
 	}
 	if _, err := os.Stat(ConfigPath(save)); !errors.Is(err, os.ErrNotExist) {
 		t.Error("Resume put the config back")
+	}
+}
+
+// The regression this pins: closing a listener stops new connections and does
+// nothing to established ones. A client holding a keep-alive connection went on
+// being served by a "paused" helper -- which is not paused, it is just harder to
+// reach. Caught by CI on Linux, where the pooled socket got reused and Windows
+// happened not to.
+func TestAPausedServerStopsAnsweringAKeptAliveConnection(t *testing.T) {
+	srv, _ := newPaused(t)
+	defer func() { _ = srv.Close() }()
+
+	port := srv.Port()
+	// deliberately the pooling kind, unlike health()
+	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{}}
+	defer client.CloseIdleConnections()
+
+	ask := func() (int, error) {
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/health", port), nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("X-Browser-Token", srv.Token())
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		// read to completion so the connection really does go back in the pool
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+
+	waitFor(t, "the first request to succeed", func() bool {
+		code, err := ask()
+		return err == nil && code == http.StatusOK
+	})
+
+	srv.Pause()
+
+	if code, err := ask(); err == nil {
+		t.Errorf("a paused helper served a kept-alive connection: HTTP %d", code)
 	}
 }
