@@ -79,12 +79,9 @@ end
 local UP = {}
 
 UP.VERSION = "0.3"     -- what this module is; the installer reports the same
-UP.state   = nil       -- the helper's last answer about versions
+UP.state   = nil       -- the last manifest answer about versions
 UP.asked   = false     -- ...and whether it has been asked yet this session
-UP.job     = nil       -- an update in flight, as the helper describes it
-UP.polling = false     -- a progress request is already out
-UP.pollAt  = 0         -- when the next one may go
-UP.POLL_EVERY = 0.3
+UP.job     = nil       -- an update in flight
 
 -- -----------------------------------------------------------------------
 -- What the parts after this one use.

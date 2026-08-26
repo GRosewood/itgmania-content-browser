@@ -48,8 +48,6 @@ itgmania-content-browser-installer [flags]
   -check                report whether the browser will work here, and exit
   -y                    don't prompt; use the first detected install
   -uninstall            remove the module files
-  -helper               run the local service the in-game browser needs
-  -manifest <url>       where the helper looks for update news
   -no-banner            don't draw the artwork banner
   -version              print version and exit
 ```
@@ -57,54 +55,42 @@ itgmania-content-browser-installer [flags]
 `-check` is the one to reach for on a cabinet: it changes nothing, prints what
 is and is not in place, and exits non-zero when something needs attention.
 
-### The local helper
+### How it works without a helper
 
-The browser talks to a small service on loopback. On a fresh install it is the
-browser's **only** route to the internet, so it is worth understanding before
-you put this on a cabinet.
+Everything the browser does runs inside the game or against ordinary web
+hosts. There is **no background service**: nothing to register, nothing
+running while the game is closed, nothing to babysit on a cabinet.
 
-ITGmania does not let a theme reach the network on its own, and its Lua file
-manager exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`,
-`GetHashForFile`, `GetDirListing` and `Unzip` — no delete, move or rename exists
-anywhere in the Lua API. What Lua *can* do is issue an HTTP request, and
-`NetworkManager::IsUrlAllowed` matches on host only, ignoring the port. So the
-installer adds `127.0.0.1` to `HttpAllowHosts`, copies itself to
-`<SaveDir>/ITGmaniaContentBrowser/content-browser-helper` (about 10 MB) and
-registers that copy to start with the user's session, running with `-helper`.
+ITGmania does not let a theme reach the network beyond an allowlist, and its
+Lua file manager exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`,
+`GetHashForFile`, `GetDirListing` and `Unzip` — no delete, move or rename
+exists anywhere in the Lua API, and `RageFile:Write` cannot write binary
+data. Within those walls:
 
-On Windows that copy does not hold a socket the whole time. It starts with the
-session, publishes a port of `0` to say it is there but not listening, and waits
-— one process-list snapshot every five seconds, which is where that check
-belongs. When ITGmania starts it binds a loopback
-port and republishes; when ITGmania exits it gives the port back, drops its
-preview cache and returns the memory. Idle it costs about 20 MB and a fifth of a per
-cent of one core -- measured, along with the antivirus, which is the part an
-earlier version of this got wrong. Nothing appears on screen at any point.
+* **Browsing and search** read stepmaniaonline.net, arrowcloud.dance and
+  itgdb.net directly — the installer allowlists them.
+* **Pack installs** stream the zip to disk with the engine's own
+  `downloadFile` and land it in `/Songs` with `FILEMAN:Unzip`.
+* **Pack deletion** truncates every file in the pack to zero bytes — the one
+  kind of remove the engine allows — which reclaims the disk immediately;
+  the emptied group leaves the music wheel on the next song reload, which
+  the browser offers on the way out. The empty folder skeleton remains.
+* **Song previews, chart windows, single-song installs, `Pack.ini` and
+  credits** come from the **preview relay** — a small web app (see
+  `itg-content-webapp`) that reads the catalogue's pack zips with ranged
+  requests and serves the game the things its engine cannot make for
+  itself: playable audio inflated out of a compressed archive, parsed
+  chart windows, and a single song re-served as a small real zip. In
+  development it runs at `http://localhost:3000`; a cabinet points at a
+  deployed copy by writing its URL as the one line of
+  `Save/ITGmaniaContentBrowser/webapp.txt`. Browsing, downloading and
+  deletion all work without it.
+* **In-game updates** fetch the release manifest from this repository, verify
+  the archive's SHA-256 with the engine's own hasher, and unzip it over the
+  module's folder.
 
-Elsewhere it listens for as long as it runs: on Linux it is a systemd user
-service and on macOS a launch agent, both of which the machine already manages
-out of sight.
-
-That service:
-
-* binds **127.0.0.1 on an OS-assigned port** and nothing else;
-* generates a fresh token per run and publishes `{port, token}` to
-  `Save/ITGmaniaContentBrowser/helper.json` with mode 0600;
-* rejects any request that is not loopback and does not carry the token
-  (compared in constant time) — every route, without exception;
-* **relays the browser's reads** to stepmaniaonline.net, arrowcloud.dance and
-  itgdb.net, and refuses any other host, redirects included. It is not an open
-  proxy;
-* serves pack deletion, audio previews, pack installs, `Pack.ini`, chart
-  credits, free space and the in-game updater;
-* resolves a pack name through the same guard the tests cover — it must be a
-  plain folder name landing directly inside a `Songs/` directory, so
-  `../Program` and friends are refused rather than acted on;
-* exits when its config file disappears or names another process, which is how
-  uninstall stops it and how an upgrade replaces it.
-
-No elevation and no system service on any platform, and `-uninstall` removes the
-registration, the binary and the config.
+Installs that ran an older version's background helper are cleaned on the
+next install run: its login item, launcher line and binary are removed.
 
 ## What the installer does
 
@@ -114,13 +100,12 @@ registration, the binary and the config.
   you Browse.
 * **Copies the module** into `Themes/Simply Love/Modules/`, removing files from
   older versions so the module never loads twice.
-* **Enables network access** by adding `127.0.0.1` to `HttpAllowHosts` in
-  `Preferences.ini` and setting `HttpEnabled=1`. That single entry is all the
-  game needs: the helper service relays the browser's reads to
-  stepmaniaonline.net, arrowcloud.dance and itgdb.net, and refuses to fetch
-  from anywhere else. (Where those hosts are already on the allowlist -- an
-  older install, or the manual scripts -- the browser still reads them
-  directly and skips the hop.)
+* **Enables network access** by adding the browser's hosts to
+  `HttpAllowHosts` in `Preferences.ini` and setting `HttpEnabled=1`: the
+  catalogue hosts, `localhost` for the preview relay in development, and the
+  GitHub hosts the in-game updater reads.
+* **Sweeps the old helper** if an earlier version installed one: its
+  scheduled task or unit, its launcher line, and its binary.
 
 The preferences edit keeps every host already on your allowlist (GrooveStats
 keeps working), changes at most two lines — `HttpAllowHosts` and `HttpEnabled` —
@@ -151,21 +136,20 @@ nothing:
 itgmania-content-browser-installer -check
 ```
 
-It prints whether `127.0.0.1` is on the allowlist, whether the helper is
-answering right now, and — the one that catches cabinets — **what is registered
-to start the helper and what that needs before it fires**. It exits non-zero
-when something needs attention, so a cabinet's startup script can run it.
+It prints whether the browser's hosts are on the allowlist, whether an old
+version's background helper left anything behind, and whether the preview
+relay is reachable. It exits non-zero when something needs attention, so a
+cabinet's startup script can run it.
 
 Most problems are one of these:
 
-* **"Local helper: NOT RUNNING"** — the browser reaches the internet through
-  it, so the browser will not open at all. Re-run the installer.
-* **"Local helper: running, waiting for ITGmania to start"** (Windows) — not a
-  problem. It opens its socket when the game does. Nothing is listening because
-  nothing needs to be.
-* **"starts only once a DESKTOP session starts"** — the machine boots straight
-  into the game, so nothing ever runs the helper. Re-run the installer, which
-  moves the install to a mechanism that does not need one.
+* **"Preview relay: NOT reachable"** — browsing, downloads and deletion all
+  work without it; song previews and single-song installs do not. Start the
+  relay, or put a deployed relay's URL in
+  `Save/ITGmaniaContentBrowser/webapp.txt`.
+* **"Old helper: ... still registered"** — a leftover from an earlier version
+  that ran a background service. Run the installer once; it sweeps the
+  registration and the binary.
 * **"Allowlist: NOT SET"** — re-run the installer **with ITGmania closed**. The
   game rewrites `Preferences.ini` from memory when it exits, so an edit made
   while it is running is thrown away.
@@ -187,16 +171,11 @@ Most problems are one of these:
   its copy keeps working.)
 
 If the allowlist is the only thing missing — `Preferences.ini` was reset or
-replaced, but the helper is still installed — the manual scripts
-`Enable Network Access.bat` (Windows) and `enable-network-access.sh`
-(macOS/Linux) in `Themes/Simply Love/Modules/` put it back without re-running
-the installer. They add `127.0.0.1` and set `HttpEnabled=1`, exactly what the
-installer writes, and never remove a host you already had. Both are plain text
-and safe to read first.
-
-They do **not** install the helper, and the browser reaches the internet through
-it — so if it is missing, they say so and point at the installer rather than
-leaving you with a loopback entry and nothing listening on it.
+replaced — the manual scripts `Enable Network Access.bat` (Windows) and
+`enable-network-access.sh` (macOS/Linux) in `Themes/Simply Love/Modules/`
+put it back without re-running the installer. They add the same hosts the
+installer writes, set `HttpEnabled=1`, and never remove a host you already
+had. Both are plain text and safe to read first.
 
 ## Requirements
 
@@ -242,8 +221,8 @@ Cutting a release is changing the version in **three places that must agree**
 [internal/branding/branding.go](internal/branding/branding.go),
 `UP.VERSION` in the payload's `04 queues.lua`, and the `VERSION` stamp file
 inside the payload's parts folder -- plus tagging `v<version>`. The stamp is
-what a restarted helper reads to know which module is actually installed;
-without it every module-only update re-offers itself forever. `build.sh`
+what says which module is actually installed; without it every
+module-only update re-offers itself forever. `build.sh`
 refuses to build a release while any of the four disagree, and `mkmodulezip`
 refuses to cut an archive whose stamp does not match, so a drift fails the
 build instead of shipping.
@@ -251,10 +230,12 @@ build instead of shipping.
 ### Publish in this order
 
 1. Bump the three versions, run `./build.sh`.
-2. Set `minHelper` in `dist/update.json` to the **oldest helper that can run
-   this module** — not automatically this release. It defaults to the version
-   being cut, which refuses the in-game update for everyone on an older
-   helper and tells them to run the installer instead.
+2. Set `minHelper` in `dist/update.json` to the **oldest browser version
+   that can update itself to this module in-game** — not automatically this
+   release. It defaults to the version being cut, which refuses the in-game
+   update for everyone older and points them at the installer instead. (The
+   name is a fossil from when a helper applied updates; the field now gates
+   the module's own updater.)
 3. Tag `v<version>` and upload the module zip to that release.
 4. Copy `dist/update.json` to the repo root and **check it against what you
    actually uploaded**:
@@ -287,11 +268,8 @@ internal/
   assets/                        banner.jpg, embedded
   banner/                        terminal artwork rendering (+ tests)
   branding/                      product name, author, slug, version
-  helper/                        loopback delete service (+ tests)
-  installer/                     discovery, Preferences.ini merge, copy,
-                                 pack removal, autostart registration
-                                 (scheduled task / systemd user unit /
-                                 launch agent) (+ tests)
+    installer/                     discovery, Preferences.ini merge, copy,
+                                   pack removal, old-helper cleanup (+ tests)
   update/                        version check and in-game update (+ tests)
 packaging/
   windows/setup.iss              Inno Setup wizard + generated wizard bitmaps

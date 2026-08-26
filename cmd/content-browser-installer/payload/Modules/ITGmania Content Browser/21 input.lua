@@ -13,7 +13,6 @@ local ActiveTabIndex             = CB.ActiveTabIndex
 local ApplyFilterRefetch         = CB.ApplyFilterRefetch
 local BROWSER_SCREEN             = CB.BROWSER_SCREEN
 local BuildFeatured              = CB.BuildFeatured
-local CheckHelper                = CB.CheckHelper
 local Clamp                      = CB.Clamp
 local CurrentPack                = CB.CurrentPack
 local DL                         = CB.DL
@@ -221,13 +220,13 @@ local BrowserInput = function(event)
 				-- Newer, but not by this road. Saying so beats starting a job
 				-- that reports its own failure a second later.
 				PlaySfx("invalid")
-				Toast(UP.Latest() .. " needs a newer helper -- run the installer once")
+				Toast(UP.Latest() .. " cannot be installed from here -- run the installer once")
 			elseif button == "Start" and firstPress then
 				PlaySfx("start")
 				state.mode = "update"
 				if not UP.Start() then
 					UP.job = { phase = "error", done = true, pct = -1,
-						error = "the helper is not running" }
+						error = "the update could not be started" }
 				end
 				-- start the clock that reads its progress
 				if refs.heart then refs.heart:playcommand("SMOArmHeartbeat") end
@@ -377,13 +376,11 @@ local BrowserInput = function(event)
 				-- the button every other list uses to open something. Removing
 				-- a pack is the rarer act and the one that cannot be undone, so
 				-- it is the one that moved off Start.
+				-- No helper check any more: removal empties the pack in place, which
+				-- is something the game does for itself, so nothing can be unavailable.
 				local pack = InstalledPack()
 				if not pack or state.removing then
 					PlaySfx("invalid")
-				elseif state.helper.status ~= "ready" then
-					PlaySfx("invalid")
-					CheckHelper(true)
-					Toast(state.helper.reason or "pack removal is unavailable")
 				else
 					PlaySfx("start")
 					state.mode = "removeconfirm"

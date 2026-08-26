@@ -749,13 +749,6 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 			local loading = showing and Snd.status == "loading"
 			local now = GetTimeSinceStart()
 
-			-- ask the helper how far along it is, a few times a second. The
-			-- request that started the work cannot answer that; it is busy.
-			if Snd.status == "loading" and now >= (Snd.pollAt or 0) then
-				Snd.pollAt = now + 0.4
-				Snd.Poll()
-			end
-
 			-- the row being talked about, and whether it is scrolled into view
 			local rowY = Snd.PickY()
 			playing = playing and rowY ~= nil

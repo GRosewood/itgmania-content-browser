@@ -335,197 +335,131 @@ end
 -- ITGmania's Lua API cannot delete anything: RageFileManager exposes only
 -- Copy, DoesFileExist, GetFileSizeBytes, GetHashForFile, GetDirListing and
 -- Unzip, and there is no delete, move or rename anywhere else in the API.
--- (The in-game deletion people remember is the engine's Ctrl+Backspace
--- shortcut on the music wheel; that is C++, unreachable from Lua, and removes
--- a single SONG rather than a pack.)
---
--- What Lua CAN do is make an HTTP request, and the engine's allowlist matches
--- on host alone, so the installer adds 127.0.0.1 to HttpAllowHosts and leaves
--- a small local service running.  Removal is then a normal request and the
--- player never leaves the game.
+-- What Lua CAN do is open a file for writing, which truncates it -- so a
+-- pack is emptied file by file further down, and the next song reload drops
+-- the hollowed group from the wheel.
 
-local HELPER_CONFIG = BROWSER_DATA_DIR .. "helper.json"
-
-local function HelperUrl(path)
-	local cfg = state.helper.config
-	if not cfg then return nil end
-	return "http://127.0.0.1:" .. cfg.port .. path
-end
-
--- read the port and token the running service published for us
-local function LoadHelperConfig()
-	if not FILEMAN:DoesFileExist(HELPER_CONFIG) then return nil end
-	local f = RageFileUtil:CreateRageFile()
-	local body
-	if f:Open(HELPER_CONFIG, RAGEFILE_READ) then
-		body = f:Read()
-		f:Close()
-	end
-	f:destroy()
-	if not body or body == "" then return nil end
-	local ok, cfg = pcall(JsonDecode, body)
-	if not ok or type(cfg) ~= "table" or not cfg.port or not cfg.token then return nil end
-	cfg.port = math.floor(tonumber(cfg.port) or 0)
-	if cfg.port <= 0 then return nil end
-	return cfg
-end
-
--- Where to fetch an outside URL from: directly, or through the helper.
---
--- Directly when this machine's allowlist permits it -- no hop, and the
--- engine's own gzip -- and through the helper's /fetch relay when it does
--- not. The relay is what lets a fresh install put ONE entry on the game's
--- allowlist, 127.0.0.1, instead of four: the helper can reach the browser's
--- hosts, refuses to reach anything else, and is already token-gated on
--- loopback for everything else it does.
---
--- The token rides in the query string rather than a header because one
--- caller cannot send headers -- a downloadFile request is issued by the
--- engine itself, not by this code. It only ever travels over loopback.
---
--- When neither road is open the original URL comes back unchanged, and the
--- request fails exactly the way a blocked request always failed -- the
--- error paths downstream already know that shape.
-local function Upstream(url)
-	if NETWORK:IsUrlAllowed(url) then return url end
-	local h = state.helper
-	if not h.config then h.config = LoadHelperConfig() end
-	if h.config then
-		local base = HelperUrl("/fetch")
-		if base and NETWORK:IsUrlAllowed(base) then
-			return base .. "?t=" .. h.config.token .. "&u=" .. UrlEncode(url)
+-- Where the preview relay lives. It reads the catalogue's pack zips with
+-- ranged requests and serves the one thing the engine cannot make for
+-- itself: playable audio, chart windows, and single-song archives. The
+-- default is the relay running beside a development machine; a cabinet
+-- whose relay lives elsewhere writes its URL as the one line of
+-- Save/ITGmaniaContentBrowser/webapp.txt. Read once: a file that has not
+-- changed mid-session is not worth reopening per press.
+local webBase
+local function WebBase()
+	if webBase then return webBase end
+	webBase = "http://localhost:3000"
+	local path = BROWSER_DATA_DIR .. "webapp.txt"
+	if FILEMAN:DoesFileExist(path) then
+		local f = RageFileUtil:CreateRageFile()
+		if f:Open(path, RAGEFILE_READ) then
+			local line = tostring(f:GetLine() or ""):gsub("%s+$", ""):gsub("/+$", "")
+			if line:match("^https?://") then webBase = line end
+			f:Close()
 		end
+		f:destroy()
 	end
+	return webBase
+end
+
+-- Once a relay: URLs used to detour through a loopback helper when the
+-- machine's allowlist refused them. The installer allowlists the catalogue's
+-- hosts directly now, so this is the URL it was handed -- kept as a seam
+-- because every fetch in the module goes through it.
+local function Upstream(url)
 	return url
 end
 
--- status: idle | checking | ready | absent
-local function CheckHelper(force)
-	local h = state.helper
-	if h.status == "checking" then return end
-	if h.status == "ready" and not force then return end
+-- Empty a pack out, in the only way the engine allows.
+--
+-- Lua has no delete. RageFileManager has Remove and DeleteRecursive in C++,
+-- but neither is bound, and the os/io libraries are not opened -- so nothing
+-- here can unlink a file. What it CAN do is open one for writing: that goes
+-- through O_TRUNC, and /Songs is not a protected path, so opening every file
+-- in a pack and closing it again drops all of them to zero bytes and hands the
+-- blocks back to the filesystem. A pack is almost entirely audio and video, so
+-- that is very nearly all of its size.
+--
+-- What survives is the folder tree: empty files in empty directories, a few
+-- kilobytes, which Lua cannot remove and which nothing reads. The songs stop
+-- loading because their step files are gone, so the group leaves the wheel on
+-- the next song reload -- which the browser already sends the player through
+-- after installing.
+--
+-- Mode 6 is WRITE|STREAMED. Plain WRITE writes a temp file and renames it over
+-- the target, which would leave the original intact until the rename and is not
+-- what is wanted here; STREAMED opens the real path directly.
+local function TruncateTree(dir, seen)
+	local wiped, failed = 0, 0
+	seen = seen or {}
+	-- A symlinked pack folder could otherwise be walked forever.
+	if seen[dir] then return 0, 0 end
+	seen[dir] = true
 
-	h.config = LoadHelperConfig()
-	if not h.config then
-		h.status = "absent"
-		h.reason = "the removal helper is not installed"
-		Refresh()
-		return
+	for name in ivalues(FILEMAN:GetDirListing(dir, false, false)) do
+		local path = dir .. name
+		local file = RageFileUtil:CreateRageFile()
+		if file:Open(path, RAGEFILE_WRITE) then
+			file:Close()
+			wiped = wiped + 1
+		else
+			failed = failed + 1
+		end
+		file:destroy()
 	end
 
-	local url = HelperUrl("/health")
-	if not NETWORK:IsUrlAllowed(url) then
-		h.status = "absent"
-		h.reason = "127.0.0.1 is missing from HttpAllowHosts"
-		Refresh()
-		return
+	for name in ivalues(FILEMAN:GetDirListing(dir, true, false)) do
+		local w, f = TruncateTree(dir .. name .. "/", seen)
+		wiped, failed = wiped + w, failed + f
 	end
-
-	h.status = "checking"
-	Refresh()
-	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = h.config.token },
-		connectTimeout = 3,
-		transferTimeout = 5,
-		onResponse = function(response)
-			if response.error == nil and response.statusCode == 200 then
-				h.status = "ready"
-				h.reason = nil
-				-- Now, and not when the browser opened: the port and token are
-				-- read off disk, and asking before that had happened was asking
-				-- nobody. This fires once, which is what UP.Check is for.
-				UP.Check()
-			else
-				h.status = "absent"
-				h.reason = "the removal helper is not running"
-			end
-			Refresh()
-		end,
-	}
-end
-
--- Sweep the empty probe files the engine leaves behind after an unzip. Best
--- effort and silent: it is tidying, not something the player asked for, and a
--- helper that is not running is not a problem worth reporting.
-local function TidyProbeFiles()
-	local h = state.helper
-	if h.status ~= "ready" or not h.config then return end
-	local url = HelperUrl("/tidy")
-	if not NETWORK:IsUrlAllowed(url) then return end
-	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = "{}",
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"]    = "application/json",
-		},
-		connectTimeout = 5,
-		transferTimeout = 60,
-		onResponse = function() end,
-	}
+	return wiped, failed
 end
 
 -- cb(ok, message)
+--
+-- Native now: the browser empties the pack itself rather than asking a local
+-- service to delete it. Nothing outside the game is involved.
 local function DeletePack(pack, cb)
-	local h = state.helper
-	if h.status ~= "ready" or not h.config then
-		cb(false, h.reason or "pack removal is unavailable")
-		return
-	end
-	local url = HelperUrl("/remove")
-	if not NETWORK:IsUrlAllowed(url) then
-		cb(false, "127.0.0.1 is missing from HttpAllowHosts")
+	local dir = "/Songs/" .. pack.name .. "/"
+	if not FILEMAN:DoesFileExist(dir) then
+		cb(false, "that pack is not in /Songs")
 		return
 	end
 
 	state.autoSync[NormalizeName(pack.name)] = nil
 	state.removing = pack.name
 	Refresh()
-	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = JsonEncode({ pack = pack.name }),
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"]    = "application/json",
-		},
-		connectTimeout = 5,
-		transferTimeout = 120,
-		onResponse = function(response)
-			state.removing = nil
-			if response.error ~= nil then
-				h.status = "absent"
-				h.reason = "the removal helper stopped responding"
-				cb(false, h.reason)
-				return
-			end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if response.statusCode == 200 and ok and type(data) == "table" and data.ok then
-				cb(true, nil)
-			else
-				local why = (ok and type(data) == "table" and data.error) or
-					("the helper returned HTTP " .. tostring(response.statusCode))
-				cb(false, tostring(why))
-			end
-		end,
-	}
+
+	local wiped, failed = TruncateTree(dir)
+	state.removing = nil
+
+	if wiped == 0 then
+		cb(false, failed > 0 and "none of the pack's files could be written"
+			or "that pack folder was already empty")
+		return
+	end
+
+	-- The group goes from the wheel on the next reload, which the browser
+	-- already offers on the way out; say so rather than implying it is gone.
+	state.needsReload = true
+	if failed > 0 then
+		cb(true, "emptied " .. wiped .. " files; " .. failed .. " were locked")
+	else
+		cb(true, nil)
+	end
 end
 
 -- -----------------------------------------------------------------------
 -- What the parts after this one use.
 
 CB.BROWSER_DATA_DIR = BROWSER_DATA_DIR
-CB.CheckHelper      = CheckHelper
 CB.Upstream         = Upstream
 CB.DeletePack       = DeletePack
 CB.GroupDirFor      = GroupDirFor
-CB.HelperUrl        = HelperUrl
 CB.INST_COLS        = INST_COLS
 CB.INST_ROWS        = INST_ROWS
-CB.LoadHelperConfig = LoadHelperConfig
 CB.RAGEFILE_READ    = RAGEFILE_READ
 CB.RAGEFILE_WRITE   = RAGEFILE_WRITE
 CB.Sync             = Sync
-CB.TidyProbeFiles   = TidyProbeFiles
+CB.WebBase          = WebBase

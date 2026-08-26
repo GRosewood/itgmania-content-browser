@@ -10,7 +10,6 @@ local CB = ...
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
 local BROWSER_DATA_DIR = CB.BROWSER_DATA_DIR
-local CheckHelper    = CB.CheckHelper
 local CurrentDay     = CB.CurrentDay
 local CurrentMonth   = CB.CurrentMonth
 local CurrentYear    = CB.CurrentYear
@@ -79,7 +78,6 @@ end
 
 local function ScanInstalled()
 	local inst = state.installed
-	CheckHelper()
 	inst.packs = {}
 	for name in ivalues(SONGMAN:GetSongGroupNames()) do
 		local songs = SONGMAN:GetSongsInGroup(name)

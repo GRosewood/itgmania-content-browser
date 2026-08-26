@@ -158,7 +158,6 @@ local state = {
 
 	-- installed packs view
 	installed     = { status="idle", packs={}, cursor=1, window=0, scannedAt=nil },
-	helper        = { status="idle", config=nil, reason=nil },
 	removing      = nil,     -- pack name currently being deleted
 	smoByName     = nil,     -- normalized pack name -> {id,name,songs,bytes,sizeStr}
 	smoById       = nil,     -- pack id -> the same record, for search results

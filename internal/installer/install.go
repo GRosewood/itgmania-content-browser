@@ -21,22 +21,12 @@ type InstallResult struct {
 	Helper     HelperResult
 }
 
-// HelperResult reports how the loopback delete helper was set up. A failure
-// here is not fatal: everything except in-game pack removal still works.
+// HelperResult reports what was cleaned off an install that used to run the
+// background helper. Earlier versions registered a login item and kept a
+// binary beside Save/; the game does everything itself now, so an upgrade's
+// whole job here is taking that machinery away.
 type HelperResult struct {
-	Binary    string
-	Autostart string
-	Running   bool
-	Err       error
-
-	// Launcher is the file that starts ITGmania at boot, when one was found
-	// and the helper start was added to it. LauncherChanged is false when the
-	// block was already there and unchanged, which is the normal case on a
-	// re-run. A failure here is reported but never fatal: the registration
-	// above still stands, and on any machine that logs in it is enough.
-	Launcher        string
-	LauncherChanged bool
-	LauncherErr     error
+	Removed []string
 }
 
 // legacyFiles are names shipped by earlier versions of this module. They must
@@ -191,53 +181,32 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 	}
 	res.Prefs = prefs
 
-	// The loopback helper is what makes in-game pack deletion possible at all.
-	// It is best-effort: if any of this fails the browser still works, and the
-	// Installed Packs screen says removal is unavailable rather than lying.
-	res.Helper = setUpHelper(inst)
+	// Nothing is set up any more -- the game fetches, unzips and truncates
+	// for itself, and previews come from the web relay. What remains is
+	// tidying away the machinery an older version left running.
+	res.Helper = cleanUpOldHelper(inst)
 	return res, nil
 }
 
-func setUpHelper(inst Install) HelperResult {
+func cleanUpOldHelper(inst Install) HelperResult {
 	var out HelperResult
 
-	// An older helper may be running and holding its own binary open.
+	// the order matters: stop whatever may be running before touching the
+	// binary it runs from, and take the registration away before the thing
+	// it registers
+	was := autostartInfo(inst)
+	if err := UnregisterAutostart(inst); err == nil && was.Mechanism != MechNone {
+		out.Removed = append(out.Removed, string(was.Mechanism))
+	}
+	if path, taken := UnpatchLauncher(inst); taken {
+		out.Removed = append(out.Removed, "launcher line in "+filepath.Base(path))
+	}
 	StopHelper(inst)
-
-	// Removal used to be a queue the player had to apply from the desktop.
-	// It is done in-game now, so the leftover queue file only confuses.
+	if RemoveHelperBinary(inst) {
+		out.Removed = append(out.Removed, "helper binary")
+	}
+	// the queue file and config of helpers long gone
 	_ = os.Remove(filepath.Join(HelperDir(inst), "pending-removals.txt"))
-
-	bin, err := InstallHelperBinary(inst)
-	if err != nil {
-		out.Err = err
-		return out
-	}
-	out.Binary = bin
-
-	if err := RegisterAutostart(inst); err != nil {
-		out.Err = err
-		return out
-	}
-	out.Autostart = AutostartDescription(inst)
-
-	// A machine that boots straight into the game logs nobody in, so the
-	// registration above never fires there. Whatever launches the game does,
-	// so the helper is started from that too. Belt and braces is safe: a
-	// second helper publishes over the first, and the first notices its token
-	// changed within two seconds and exits, so the pair converges to one.
-	if path, changed, err := PatchLauncher(inst); err != nil {
-		out.LauncherErr = err
-	} else if path != "" {
-		out.Launcher, out.LauncherChanged = path, changed
-	}
-
-	// Start it now so the feature works before the next login.
-	if err := StartHelper(inst); err != nil {
-		out.Err = err
-		return out
-	}
-	out.Running = true
 	return out
 }
 

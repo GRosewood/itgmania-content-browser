@@ -9,7 +9,6 @@ local CB = ...
 
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
-local HelperUrl            = CB.HelperUrl
 local LEVEL                = CB.LEVEL
 local LiftAboveSystemLayer = CB.LiftAboveSystemLayer
 local Refresh              = CB.Refresh
@@ -39,8 +38,8 @@ local function NetworkBlockedReason()
 	if not HttpIsEnabled() then
 		return "HttpEnabled is turned off in Save/Preferences.ini."
 	end
-	return "stepmaniaonline.net is not in HttpAllowHosts, and the helper "
-		.. "that could relay for it is not running."
+	return "stepmaniaonline.net is not in HttpAllowHosts."
+		.. " Run the installer, or the Enable Network Access script, again."
 end
 
 -- -----------------------------------------------------------------------
@@ -127,96 +126,123 @@ function UP.Busy()
 	return UP.job ~= nil and UP.job.done ~= true
 end
 
--- Ask once a session. The helper caches its own answer for an hour, so asking
--- again would spend a round trip to be told the same thing.
+-- Where update news lives: the repo's own manifest, the same file the old
+-- helper read. Fetched by the game itself now -- the installer allowlists
+-- github.com and *.githubusercontent.com for exactly this.
+UP.MANIFEST = "https://raw.githubusercontent.com/GRosewood/itgmania-content-browser/main/update.json"
+
+-- is b a newer dotted version than a?
+local function Newer(b, a)
+	local function parts(v)
+		local out = {}
+		for n in tostring(v or ""):gmatch("%d+") do out[#out+1] = tonumber(n) end
+		return out
+	end
+	local pb, pa = parts(b), parts(a)
+	for i = 1, math.max(#pb, #pa) do
+		local x, y = pb[i] or 0, pa[i] or 0
+		if x ~= y then return x > y end
+	end
+	return false
+end
+
+-- Ask once a session: one manifest fetch, and the answer shaped the way the
+-- rest of the browser has always read it.
 function UP.Check()
 	if UP.asked or state.retired then return end
-	local h = state.helper
-	if not (h and h.config) then return end
-	local url = HelperUrl("/version")
-	if not url or not NETWORK:IsUrlAllowed(url) then return end
+	if not NETWORK:IsUrlAllowed(UP.MANIFEST) then return end
 
 	UP.asked = true
 	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = h.config.token },
-		connectTimeout = 3,
-		-- the helper may be reaching the manifest for the first time, and a
-		-- cabinet on a slow line should not turn that into a failure
+		url = UP.MANIFEST,
+		connectTimeout = 5,
 		transferTimeout = 25,
 		onResponse = function(response)
 			if state.retired or response.error ~= nil then return end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if not ok or type(data) ~= "table" then return end
-			if type(data.update) ~= "table" then return end
-			UP.state = data.update
+			if response.statusCode ~= 200 then return end
+			local ok, man = pcall(JsonDecode, response.body or "")
+			if not ok or type(man) ~= "table" or type(man.version) ~= "string" then return end
+			UP.manifest = man
+			local mod = type(man.module) == "table" and man.module or {}
+			local available = Newer(man.version, UP.VERSION)
+			-- an update the game can finish by itself needs a published
+			-- archive, a checksum to hold it against, and a hasher to do the
+			-- holding
+			local inGame = type(mod.url) == "string" and mod.url ~= ""
+				and type(mod.sha256) == "string" and mod.sha256 ~= ""
+				and NETWORK:IsUrlAllowed(mod.url)
+			UP.state = {
+				current   = UP.VERSION,
+				latest    = man.version,
+				notes     = tostring(man.notes or ""),
+				available = available,
+				inGame    = available and inGame or false,
+				reason    = (available and not inGame) and "run the installer to get this one" or nil,
+			}
 			Refresh()
 		end,
 	}
 end
 
--- Begin. The helper does the work and reports through UP.Poll, the same shape
--- a pack install takes.
+-- Begin. The game does the whole job itself: the archive to /Downloads, the
+-- checksum against the manifest, and Unzip over the module's own folder.
 function UP.Start()
-	local h = state.helper
-	if not (h and h.config) then return false end
-	local url = HelperUrl("/update")
-	if not url or not NETWORK:IsUrlAllowed(url) then return false end
+	local man = UP.manifest
+	local mod = man and type(man.module) == "table" and man.module or nil
+	if not (mod and mod.url and NETWORK:IsUrlAllowed(mod.url)) then return false end
 
-	UP.job = { phase = "checking", pct = -1 }
-	UP.pollAt = 0
+	UP.job = { phase = "downloading", pct = 0 }
+	local zipname = "cb-update.zip"
 	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = "{}",
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"] = "application/json",
-		},
-		connectTimeout = 3,
-		transferTimeout = 10,
+		url = mod.url,
+		downloadFile = zipname,
+		connectTimeout = 10,
+		onProgress = function(current, total)
+			if total and total > 0 then
+				UP.job = { phase = "downloading", pct = current / total }
+			end
+		end,
 		onResponse = function(response)
 			if state.retired then return end
-			if response.error ~= nil then
+			if response.error ~= nil or response.statusCode ~= 200 then
 				UP.job = { phase = "error", done = true, pct = -1,
-					error = "could not reach the helper" }
+					error = response.errorMessage or ("HTTP " .. tostring(response.statusCode)) }
 				Refresh()
+				return
 			end
+
+			-- Everything below must happen inside this response: the engine
+			-- deletes the downloaded file when the callback returns, and
+			-- UP.Reload may only run from an HTTP response besides.
+			local zip = "/Downloads/" .. zipname
+			local sum = CRYPTMAN:SHA256File(zip)
+			if type(sum) ~= "string" or sum:lower() ~= tostring(mod.sha256):lower() then
+				UP.job = { phase = "error", done = true, pct = -1,
+					error = "the download did not match its checksum" }
+				Refresh()
+				return
+			end
+
+			UP.job = { phase = "writing", pct = -1 }
+			-- into the theme that is actually running this module: a fork
+			-- keeps its own name, and writing into a folder that merely has
+			-- the stock name would change nothing the player can see
+			local dest = "/Themes/" .. THEME:GetCurThemeName() .. "/Modules/"
+			if not FILEMAN:Unzip(zip, dest, 0) then
+				UP.job = { phase = "error", done = true, pct = -1,
+					error = "the new files could not be written" }
+				Refresh()
+				return
+			end
+
+			UP.job = { phase = "done", done = true, pct = 1,
+				version = UP.state and UP.state.latest or nil }
+			-- The new files are on disk. This is the one place they can be
+			-- picked up -- see UP.Reload for why it has to be here.
+			UP.Reload()
 		end,
 	}
 	return true
-end
-
-function UP.Poll()
-	if UP.polling or state.retired then return end
-	local h = state.helper
-	if not (h and h.config) then return end
-	local url = HelperUrl("/update/progress")
-	if not url or not NETWORK:IsUrlAllowed(url) then return end
-
-	UP.polling = true
-	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = h.config.token },
-		connectTimeout = 3,
-		transferTimeout = 8,
-		onResponse = function(response)
-			UP.polling = false
-			if state.retired or response.error ~= nil then return end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if not ok or type(data) ~= "table" or type(data.progress) ~= "table" then
-				return
-			end
-			UP.job = data.progress
-			if UP.job.done and UP.job.phase == "done" then
-				-- The new files are on disk. This is the one place they can be
-				-- picked up -- see UP.Reload for why it has to be here.
-				UP.Reload()
-				return
-			end
-			Refresh()
-		end,
-	}
 end
 
 -- Swap this module for the one that was just written.

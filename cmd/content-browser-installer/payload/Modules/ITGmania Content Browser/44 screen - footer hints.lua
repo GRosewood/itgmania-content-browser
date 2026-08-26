@@ -145,17 +145,7 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 			self:zoom(0.4):diffuse(0.55, 0.55, 0.55, 0.85)
 		end,
 		SMORefreshMessageCommand = function(self)
-			local text = "v" .. UP.VERSION
-			-- The module and the helper are replaced by different things -- an
-			-- in-game update takes only the module, the installer takes both --
-			-- so they can be different versions, and when they are that is the
-			-- answer to most of what looks wrong. Said only when it is true:
-			-- there is nothing to tell a player whose halves agree.
-			local cfg = state.helper.config
-			if cfg and cfg.version and cfg.version ~= UP.VERSION then
-				text = text .. "  helper " .. cfg.version
-			end
-			self:settext(text)
+			self:settext("v" .. UP.VERSION)
 		end,
 	}
 

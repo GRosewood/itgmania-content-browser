@@ -12,7 +12,6 @@ local CB = ...
 local ActiveTabIndex       = CB.ActiveTabIndex
 local BrowserInput         = CB.BrowserInput
 local BuildFeatured        = CB.BuildFeatured
-local CheckHelper          = CB.CheckHelper
 local FetchPackTypes       = CB.FetchPackTypes
 local FetchPacks           = CB.FetchPacks
 local LO                   = CB.LO
@@ -110,20 +109,8 @@ function CB.Screen.Frame()
 			end
 			SetRedirect(true)
 
-			-- and how much room the drive has, for the download gate
-			LO.SpaceAsk()
-			-- Say hello to the helper on the way in rather than waiting for the
-			-- Installed tab. It costs one loopback request, queued behind the
-			-- first page fetch so it cannot delay anything being drawn, and it
-			-- is what tells the browser its own version is out of date.
-			--
-			-- Forced, so the port and token are read off disk again. The helper
-			-- picks a fresh port every time it starts and publishes it there,
-			-- and it starts again whenever it is upgraded -- so a browser that
-			-- trusted the address it learned on its first visit would spend the
-			-- rest of the session talking to a port nobody is listening on.
-			CheckHelper(true)
-			-- and if it had already said hello, ask right now instead
+			-- Ask after updates on the way in: one manifest fetch, queued
+			-- behind the first page fetch so it cannot delay anything drawn.
 			UP.Check()
 
 			self:playcommand("SMOArmHeartbeat")

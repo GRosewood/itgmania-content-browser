@@ -3,22 +3,14 @@
 package installer
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 )
 
 func isWindows() bool { return false }
-
-// detachProcess puts the helper in its own session so it outlives the shell
-// the installer was run from.
-func detachProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-}
 
 // How the helper starts on macOS and Linux.
 //
@@ -179,139 +171,6 @@ func legacyAutostartPath(inst Install) string {
 		"itgmania-content-browser-helper.desktop")
 }
 
-// writeOwned writes a file and hands it back to whoever owns the tree it went
-// into, so a sudo install does not leave the player unable to change it.
-func writeOwned(path, body string, inst Install) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	model := autostartHome(inst)
-	chownLike(path, model)
-	chownLike(dir, model)
-	return nil
-}
-
-func registerAutostart(inst Install) error {
-	_ = os.Remove(legacyAutostartPath(inst))
-
-	if runtime.GOOS == "darwin" {
-		return registerLaunchAgent(inst)
-	}
-	if haveSystemd() {
-		// Exactly one mechanism: a leftover .desktop from an older install
-		// would otherwise start a second helper beside the service.
-		_ = os.Remove(autostartDesktopPath(inst))
-		return registerSystemdUser(inst)
-	}
-	_ = os.Remove(systemdWantsPath(inst))
-	_ = os.Remove(systemdUnitPath(inst))
-	return registerXDG(inst)
-}
-
-// registerSystemdUser writes the unit and the symlink that enables it.
-//
-// Restart=on-failure rather than always: the helper exits 0 on purpose when its
-// config is removed, which is how uninstall and upgrade stop it, and `always`
-// would fight both by bringing it straight back.
-func registerSystemdUser(inst Install) error {
-	if err := writeOwned(systemdUnitPath(inst), systemdUnitBody(inst), inst); err != nil {
-		return err
-	}
-
-	// The wants symlink IS the enable. Relative, so it survives the home
-	// directory being moved or mounted elsewhere.
-	link := systemdWantsPath(inst)
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		return err
-	}
-	_ = os.Remove(link)
-	if err := os.Symlink(filepath.Join("..", systemdUnitName(inst)), link); err != nil {
-		return fmt.Errorf("enabling %s: %w", systemdUnitName(inst), err)
-	}
-	chownLike(link, autostartHome(inst))
-	chownLike(filepath.Dir(link), autostartHome(inst))
-
-	// Best effort: tell a running user instance about the new unit. Absent or
-	// unreachable systemctl is not a failure -- the unit is on disk and the
-	// next login picks it up, which is the case this exists for.
-	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-	return nil
-}
-
-func systemdUnitBody(inst Install) string {
-	quoted := make([]string, 0, len(helperArgs(inst))+1)
-	for _, a := range append([]string{HelperBinary(inst)}, helperArgs(inst)...) {
-		quoted = append(quoted, systemdQuote(a))
-	}
-
-	return "[Unit]\n" +
-		"Description=ITGMania Content Browser helper\n" +
-		"Documentation=https://github.com/GRosewood/itgmania-content-browser\n" +
-		"\n" +
-		"[Service]\n" +
-		"Type=simple\n" +
-		"ExecStart=" + strings.Join(quoted, " ") + "\n" +
-		"WorkingDirectory=" + systemdQuote(HelperDir(inst)) + "\n" +
-		"Restart=on-failure\n" +
-		"RestartSec=5\n" +
-		"\n" +
-		"[Install]\n" +
-		"WantedBy=default.target\n"
-}
-
-func registerXDG(inst Install) error {
-	body := "[Desktop Entry]\n" +
-		"Type=Application\n" +
-		"Name=ITGMania Content Browser Helper\n" +
-		"Comment=The local service the in-game pack browser needs\n" +
-		"Exec=" + desktopExec(HelperBinary(inst), helperArgs(inst)) + "\n" +
-		"X-GNOME-Autostart-enabled=true\n" +
-		"NoDisplay=true\n"
-	return writeOwned(autostartDesktopPath(inst), body, inst)
-}
-
-// registerLaunchAgent writes the macOS plist.
-//
-// KeepAlive is a dictionary rather than a bare false so launchd restarts a
-// helper that DIED but leaves alone one that exited cleanly -- the deliberate
-// stop is an exit 0, and a bare true would fight uninstall.
-func registerLaunchAgent(inst Install) error {
-	return writeOwned(launchAgentPath(inst), launchAgentBody(inst), inst)
-}
-
-func launchAgentBody(inst Install) string {
-	var argXML strings.Builder
-	argXML.WriteString("\t\t<string>" + xmlEscape(HelperBinary(inst)) + "</string>\n")
-	for _, a := range helperArgs(inst) {
-		argXML.WriteString("\t\t<string>" + xmlEscape(a) + "</string>\n")
-	}
-	return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>` + launchAgentLabel(inst) + `</string>
-	<key>ProgramArguments</key>
-	<array>
-` + argXML.String() + `	</array>
-	<key>WorkingDirectory</key>
-	<string>` + xmlEscape(HelperDir(inst)) + `</string>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<dict>
-		<key>SuccessfulExit</key>
-		<false/>
-	</dict>
-</dict>
-</plist>
-`
-}
-
 func unregisterAutostart(inst Install) error {
 	_ = os.Remove(legacyAutostartPath(inst))
 	// Clear every mechanism, not just the one this machine would register now:
@@ -358,12 +217,8 @@ func autostartInfo(inst Install) AutostartStatus {
 		// image /var/lib/systemd cannot be written, so enable-linger fails with
 		// "read-only file system" and no hint about what to do instead.
 		if readOnlyFS(lingerDir) {
-			note = "A systemd user service starts for any login session, desktop " +
-				"or not -- but NOT for a machine that boots straight into the game " +
-				"without logging anybody in. Lingering would fix that, and cannot " +
-				"be enabled here: " + lingerDir + " is on a read-only filesystem. " +
-				"Start the helper from whatever launches ITGmania instead, by " +
-				"adding this line before the game: " + HelperCommand(inst)
+			note = "This is a leftover from the old background helper; running " +
+				"the installer once takes it away."
 		}
 		if lingering(autostartHome(inst)) {
 			starts = StartsAtBoot
@@ -423,42 +278,6 @@ func baseName(path string) string {
 func isSymlink(path string) bool {
 	st, err := os.Lstat(path)
 	return err == nil && st.Mode()&os.ModeSymlink != 0
-}
-
-func autostartDescription(inst Install) string { return autostartPath(inst) }
-
-// systemdQuote quotes a value for a unit file's ExecStart.
-//
-// Not shell quoting: systemd splits on whitespace and understands double quotes
-// with backslash escapes inside them, so an argument with a space is wrapped and
-// backslashes and quotes within it are escaped.
-func systemdQuote(s string) string {
-	if s != "" && !strings.ContainsAny(s, " \t\n\"'\\") {
-		return s
-	}
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + r.Replace(s) + `"`
-}
-
-// desktopExec builds an Exec= value per the XDG Desktop Entry spec, which is
-// not shell quoting: an argument with spaces is wrapped in double quotes, and
-// inside those quotes backslash, double quote, backtick and dollar are escaped
-// with a backslash. Percent signs are doubled everywhere, quoted or not.
-func desktopExec(bin string, args []string) string {
-	parts := make([]string, 0, len(args)+1)
-	for _, a := range append([]string{bin}, args...) {
-		parts = append(parts, desktopQuote(a))
-	}
-	return strings.Join(parts, " ")
-}
-
-func desktopQuote(s string) string {
-	s = strings.ReplaceAll(s, "%", "%%")
-	if !strings.ContainsAny(s, " \t\n\"'\\><~|&;$*?#()`") {
-		return s
-	}
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`)
-	return `"` + r.Replace(s) + `"`
 }
 
 func xmlEscape(s string) string {

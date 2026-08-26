@@ -27,11 +27,9 @@ package installer
 //     that would abort the script and leave the cabinet with no game at all.
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const (
@@ -86,22 +84,6 @@ func FindGameLauncher(inst Install) (string, bool) {
 	return "", false
 }
 
-// helperBlock is the fenced snippet inserted into a launcher.
-func helperBlock(inst Install) string {
-	var b strings.Builder
-	b.WriteString(launcherOpen + "\n")
-	b.WriteString("# Added by the ITGMania Content Browser installer.\n")
-	b.WriteString("# Starts the local service the in-game browser needs. This machine\n")
-	b.WriteString("# boots straight into the game, so nothing else would start it.\n")
-	b.WriteString("# Removed again by running the installer with -uninstall.\n")
-	b.WriteString("if [ -x " + quoteArg(HelperBinary(inst)) + " ]; then\n")
-	b.WriteString("  " + quoteArg(HelperBinary(inst)) + " -helper -install-dir " +
-		quoteArg(inst.Root) + " >/dev/null 2>&1 &\n")
-	b.WriteString("fi\n")
-	b.WriteString(launcherClose)
-	return b.String()
-}
-
 // stripBlock removes a previously inserted block, returning the remaining
 // lines and whether one was there.
 func stripBlock(lines []string) ([]string, bool) {
@@ -121,76 +103,6 @@ func stripBlock(lines []string) ([]string, bool) {
 		}
 	}
 	return out, found
-}
-
-// PatchLauncher inserts the helper start into the file that launches the game.
-//
-// The block goes immediately BEFORE the first line that mentions ITGmania,
-// because that line commonly execs the game and nothing after an exec ever
-// runs.
-func PatchLauncher(inst Install) (path string, changed bool, err error) {
-	path, ok := FindGameLauncher(inst)
-	if !ok {
-		return "", false, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return path, false, err
-	}
-	original := string(raw)
-	nl := "\n"
-	if strings.Contains(original, "\r\n") {
-		nl = "\r\n"
-	}
-	lines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
-
-	// An upgrade replaces its own block rather than stacking another one.
-	lines, had := stripBlock(lines)
-
-	insertAt := len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if t == "" || strings.HasPrefix(t, "#") {
-			continue
-		}
-		if strings.Contains(strings.ToLower(t), "itgmania") {
-			insertAt = i
-			break
-		}
-	}
-
-	block := strings.Split(helperBlock(inst), "\n")
-	updated := make([]string, 0, len(lines)+len(block)+1)
-	updated = append(updated, lines[:insertAt]...)
-	updated = append(updated, block...)
-	updated = append(updated, "")
-	updated = append(updated, lines[insertAt:]...)
-
-	body := strings.Join(updated, nl)
-	if body == original {
-		return path, false, nil
-	}
-
-	if !had {
-		// Only back up the first time we touch it; an upgrade replacing its own
-		// block does not need a fresh copy of a file it already owns part of.
-		backup := path + ".bak-" + time.Now().Format("20060102-150405")
-		if err := os.WriteFile(backup, raw, 0o644); err != nil {
-			return path, false, fmt.Errorf("backing up %s: %w", path, err)
-		}
-		chownLike(backup, path)
-	}
-
-	info, statErr := os.Stat(path)
-	mode := os.FileMode(0o644)
-	if statErr == nil {
-		mode = info.Mode().Perm()
-	}
-	if err := os.WriteFile(path, []byte(body), mode); err != nil {
-		return path, false, fmt.Errorf("writing %s: %w", path, err)
-	}
-	chownLike(path, filepath.Dir(path))
-	return path, true, nil
 }
 
 // UnpatchLauncher takes the block back out again.

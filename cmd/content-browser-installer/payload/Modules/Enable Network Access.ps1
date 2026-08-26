@@ -7,7 +7,7 @@
 # the internet — so the machine's owner has to authorize it, from outside the
 # game. That's what this script is: you run it yourself, with the game closed.
 #
-# It adds 127.0.0.1 to the HttpAllowHosts line in your Preferences.ini
+# It adds every host the browser reaches to the HttpAllowHosts line in your Preferences.ini
 # (keeping every host already listed) and makes sure HttpEnabled=1. Nothing
 # else is touched, and a timestamped backup is written next to the file.
 #
@@ -17,57 +17,18 @@ param([switch]$NoPause)
 
 $ErrorActionPreference = "Stop"
 
-# One entry, and it is the loopback address.
-#
-# This used to write the catalogue hosts -- stepmaniaonline.net and friends --
-# because the browser fetched them directly. It does not any more: it talks to
-# a small local helper, and the helper does the fetching. So the game needs to
-# reach exactly one place, and the six domain entries this used to add were six
-# more than the browser needs.
-#
-# That matters beyond tidiness. HttpAllowHosts is global to the GAME, not to
-# this module: every entry on it is reachable by every other theme and module
-# on the machine. Keeping it at one loopback address is the whole reason the
-# relay exists.
+# Every host the browser reaches, written directly: the catalogue and its
+# artwork, the popularity and doubles sources, the preview relay (localhost
+# in development; put a deployed relay's host here or in webapp.txt), and
+# the update manifest with its archive host.
 #
 # Nothing is ever REMOVED from the list -- an existing GrooveStats entry, or
-# the catalogue hosts an older version of this script added, are left exactly
-# where they are.
-$Hosts = @("127.0.0.1")
+# anything another module added, is left exactly where it is.
+$Hosts = @("stepmaniaonline.net", "*.stepmaniaonline.net", "arrowcloud.dance", "*.arrowcloud.dance", "itgdb.net", "*.itgdb.net", "localhost", "127.0.0.1", "github.com", "*.githubusercontent.com")
 
-function Fail($msg) {
-    Write-Host ""
-    Write-Host "  $msg" -ForegroundColor Red
-    Write-Host ""
-    if (-not $NoPause) { Read-Host "Press Enter to close" }
-    exit 1
+function Report-Done {
+    Write-Host "  Start ITGmania and open Find Content from the title menu." -ForegroundColor Green
 }
-
-# Say whether the thing the allowlist points AT is actually there.
-#
-# One loopback entry with nothing listening on it goes nowhere, so ending on
-# "start the game and open Find Content" would be sending people to a browser
-# that cannot open. The helper only ever arrives with the installer.
-function Report-Helper([string]$prefsPath) {
-    $helperDir = Join-Path (Split-Path -Parent $prefsPath) "ITGmaniaContentBrowser"
-    if (Test-Path (Join-Path $helperDir "content-browser-helper.exe")) {
-        Write-Host "  The local helper is installed beside it."
-        Write-Host "  Start ITGmania and open Find Content from the title menu."
-        Write-Host ""
-        return
-    }
-    Write-Host "  One thing is still missing: the local helper is not installed," -ForegroundColor Yellow
-    Write-Host "  and the browser reaches the internet THROUGH it. An allowlist" -ForegroundColor Yellow
-    Write-Host "  entry for 127.0.0.1 with nothing listening there goes nowhere." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Run the installer, which adds the helper and makes this same"
-    Write-Host "  allowlist edit."
-    Write-Host ""
-    Write-Host "  Looked for the helper in:"
-    Write-Host "    $helperDir"
-    Write-Host ""
-}
-
 Write-Host ""
 Write-Host "  ITGMania Content Browser - enable network access" -ForegroundColor Cyan
 Write-Host "  ----------------------------------------"
@@ -188,9 +149,9 @@ if (-not $sawAllowHosts -or -not $sawEnabled) {
 }
 
 if (-not $changed) {
-    Write-Host "  Already set up - 127.0.0.1 is allowed and HttpEnabled=1." -ForegroundColor Green
+    Write-Host "  Already set up - every host is allowed and HttpEnabled=1." -ForegroundColor Green
     Write-Host ""
-    Report-Helper $prefs
+    Report-Done $prefs
     if (-not $NoPause) { Read-Host "Press Enter to close" }
     exit 0
 }
@@ -211,9 +172,9 @@ if (-not ($hostsOK -and $enabledOK)) {
 }
 
 Write-Host "  Done." -ForegroundColor Green
-Write-Host "    127.0.0.1 added to HttpAllowHosts"
+Write-Host "    the browser hosts were added to HttpAllowHosts"
 Write-Host "    HttpEnabled=1"
 Write-Host "    backup saved as $(Split-Path -Leaf $backup)"
 Write-Host ""
-Report-Helper $prefs
+Report-Done $prefs
 if (-not $NoPause) { Read-Host "Press Enter to close" }

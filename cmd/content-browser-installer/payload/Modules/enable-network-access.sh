@@ -6,7 +6,7 @@
 # write-protected inside the game. So the machine's owner authorizes it from
 # outside the game - that's this script.
 #
-# It adds 127.0.0.1 to the HttpAllowHosts line in Preferences.ini (keeping every
+# It adds every host the browser reaches to the HttpAllowHosts line in Preferences.ini (keeping every
 # host already listed) and sets HttpEnabled=1. A timestamped backup is written
 # next to the file.
 #
@@ -17,48 +17,19 @@
 
 set -uo pipefail
 
-# One entry, and it is the loopback address.
-#
-# This used to write the catalogue hosts -- stepmaniaonline.net and friends --
-# because the browser fetched them directly. It does not any more: it talks to
-# a small local helper, and the helper does the fetching. So the game needs to
-# reach exactly one place, and the six domain entries this used to add were six
-# more than the browser needs.
-#
-# That matters beyond tidiness. HttpAllowHosts is global to the GAME, not to
-# this module: every entry on it is reachable by every other theme and module
-# on the machine. Keeping it at one loopback address is the whole reason the
-# relay exists.
+# Every host the browser reaches, written directly: the catalogue and its
+# artwork, the popularity and doubles sources, the preview relay (localhost
+# in development; put a deployed relay's host here or in webapp.txt), and
+# the update manifest with its archive host.
 #
 # Nothing is ever REMOVED from the list -- an existing GrooveStats entry, or
-# the catalogue hosts an older version of this script added, are left exactly
-# where they are. Taking away access somebody else may be relying on is not
-# this script's business.
-NEW_HOSTS="127.0.0.1"
+# anything another module added, is left exactly where it is. Taking away
+# access somebody else may be relying on is not this script's business.
+NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,127.0.0.1,github.com,*.githubusercontent.com"
 
-die() { printf '\n  %s\n\n' "$1" >&2; exit 1; }
-
-# Say whether the thing the allowlist points AT is actually there.
-#
-# One loopback entry with nothing listening on it goes nowhere, so a script that
-# ended on "start the game and open Find Content" would be sending people to a
-# browser that cannot open. The helper only ever arrives with the installer.
-report_helper() {
-    helper_dir="$(dirname "$PREFS")/ITGmaniaContentBrowser"
-    if [ -f "$helper_dir/content-browser-helper" ]; then
-        printf '  The local helper is installed beside it.\n'
-        printf '  Start ITGmania and open Find Content from the title menu.\n\n'
-        return 0
-    fi
-    printf '  One thing is still missing: the local helper is not installed,\n'
-    printf '  and the browser reaches the internet THROUGH it. An allowlist\n'
-    printf '  entry for 127.0.0.1 with nothing listening there goes nowhere.\n\n'
-    printf '  Run the installer, which adds the helper and makes this same\n'
-    printf '  allowlist edit:\n\n'
-    printf '    itgmania-content-browser-installer\n\n'
-    printf '  Looked for the helper in:\n    %s\n\n' "$helper_dir"
+report_done() {
+    printf '  Start ITGmania and open Find Content from the title menu.\n\n'
 }
-
 printf '\n  ITGMania Content Browser - enable network access\n'
 printf '  -----------------------------------------------\n\n'
 
@@ -201,8 +172,8 @@ if [ "$STATUS" -ge 9 ] && [ "$STATUS" -le 11 ]; then
 fi
 
 if [ "$STATUS" -eq 1 ]; then
-    printf '  Already set up - 127.0.0.1 is allowed and HttpEnabled=1.\n\n'
-    report_helper
+    printf '  Already set up - every host is allowed and HttpEnabled=1.\n\n'
+    report_done
     exit 0
 fi
 
@@ -221,10 +192,10 @@ last_enabled="$(grep -i '^[[:space:]]*HttpEnabled[[:space:]]*=' "$PREFS" | tail 
 if printf '%s' "$last_hosts" | grep -q '127\.0\.0\.1' &&
    printf '%s' "$last_enabled" | grep -q '=[[:space:]]*1[[:space:]]*$'; then
     printf '  Done.\n'
-    printf '    127.0.0.1 added to HttpAllowHosts\n'
+    printf '    the browser hosts were added to HttpAllowHosts\n'
     printf '    HttpEnabled=1\n'
     printf '    backup saved as %s\n\n' "$(basename "$BACKUP")"
-    report_helper
+    report_done
 else
     cp "$BACKUP" "$PREFS"
     die "The allowlist could not be written; Preferences.ini was restored from the backup."

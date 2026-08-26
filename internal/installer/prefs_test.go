@@ -35,8 +35,8 @@ func TestMergeHosts(t *testing.T) {
 		},
 		{
 			name:    "case-insensitive match is a no-op",
-			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,127.0.0.1",
-			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,127.0.0.1",
+			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
+			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
 			changed: false,
 		},
 		{
@@ -52,13 +52,22 @@ func TestMergeHosts(t *testing.T) {
 			changed: true,
 		},
 		{
-			// A leftover direct-host entry from the days the allowlist carried
-			// seven is kept -- the module still prefers direct where it can --
-			// and only the loopback entry is added.
-			name:    "partial presence adds only what is missing",
-			in:      "stepmaniaonline.net",
-			want:    all("stepmaniaonline.net"),
+			// One host already there, the rest added, and no duplicate of the
+			// one that was. mergeHosts de-duplicates case-insensitively, so an
+			// entry the file already carries is kept in its original position
+			// and not appended a second time.
+			name: "partial presence adds only what is missing",
+			in:   "stepmaniaonline.net",
+			want: "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance," +
+				"*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
 			changed: true,
+		},
+		{
+			// Nothing to do: every host this install needs is already listed.
+			name:    "a complete allowlist is left exactly as it is",
+			in:      "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
+			want:    "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
+			changed: false,
 		},
 	}
 

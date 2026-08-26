@@ -57,8 +57,6 @@ func main() {
 		versionFlag   = flag.Bool("version", false, "print version and exit")
 		noBannerFlag  = flag.Bool("no-banner", false, "do not draw the artwork banner")
 		detectFlag    = flag.Bool("detect", false, "print the best-guess install directory and exit (for GUI front-ends)")
-		helperFlag    = flag.Bool("helper", false, "run the local service the in-game browser needs")
-		manifestFlag  = flag.String("manifest", "", "where the helper looks for update news (default: the published one)")
 		userFlag      = flag.String("user", "", "the account ITGmania runs as (default: work it out)")
 		verboseFlag   = flag.Bool("verbose", false, "list every file installed or removed")
 		checkFlag     = flag.Bool("check", false, "report whether the browser will actually work on this machine, and exit")
@@ -66,7 +64,7 @@ func main() {
 	flag.Parse()
 
 	// Pinning the account has to happen before anything inspects an install,
-	// because the save profile, the helper location and the autostart
+	// because the save profile and any old-helper leftovers to sweep
 	// registration all hang off it.
 	installer.ForceUser(*userFlag)
 
@@ -90,14 +88,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	// -helper is a long-running service, not an install run; it never draws
-	// chrome and never prompts.
-	if *helperFlag {
-		os.Exit(runHelper(*targetFlag, *manifestFlag))
-	}
-
 	// -check changes nothing. It exists because the two ways this goes wrong on
-	// a cabinet -- the allowlist and whether anything will start the helper --
+	// a cabinet -- the allowlist and whether the preview relay is reachable --
 	// are both invisible from inside the game, which can only report that it
 	// cannot reach the network.
 	if *checkFlag {
@@ -326,7 +318,7 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 
 	// A count, not a roll call. The payload is 69 files, and listing every
 	// one buried the things actually worth reading -- which theme it went
-	// into, whether the helper came up -- under screens of scrollback.
+	// into, what was cleaned up -- under screens of scrollback.
 	// -verbose brings the names back when something needs chasing.
 	fmt.Printf("  Installed:      %d files\n", len(res.Written))
 	fmt.Printf("    -> %s\n", res.ModulesDir)
@@ -341,7 +333,7 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	case res.Prefs.Created:
 		fmt.Println("  Network access: enabled (created Preferences.ini)")
 	case res.Prefs.Changed:
-		fmt.Println("  Network access: enabled (127.0.0.1 added to HttpAllowHosts -- the helper relays the rest)")
+		fmt.Printf("  Network access: enabled (%d hosts added to HttpAllowHosts)\n", len(installer.Hosts))
 		if res.Prefs.BackupPath != "" {
 			fmt.Printf("    backup: %s\n", filepath.Base(res.Prefs.BackupPath))
 		}
@@ -349,30 +341,11 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		fmt.Println("  Network access: already enabled")
 	}
 
-	// The helper is not a nicety any more. With 127.0.0.1 as the only entry on
-	// the allowlist it is the browser's only road to the internet, so "the
-	// browser still works, only deletion is off" stopped being true when the
-	// relay landed. Say what is actually at stake, and say plainly when the
-	// thing meant to start it will not.
-	// One line, not a report.
-	//
-	// The helper is an implementation detail: which mechanism registered it,
-	// where the unit file went, what that mechanism needs before it fires --
-	// none of it is actionable while it is working, and all of it buried the
-	// one thing that is. -check still prints the whole picture for when it is
-	// NOT working, which is when somebody actually wants it.
-	switch {
-	case res.Helper.Err != nil:
-		fmt.Printf("  Local helper:   FAILED (%v)\n", res.Helper.Err)
-		fmt.Println("    The browser reaches the internet through it, so it will not open.")
-		fmt.Println("    Run this installer with -check for the details.")
-	case res.Helper.Running && installer.GameWatchSupported():
-		fmt.Println("  Local helper:   installed and running (it opens its socket when ITGmania does)")
-	case res.Helper.Running:
-		fmt.Println("  Local helper:   installed and running")
-	default:
-		fmt.Println("  Local helper:   installed, but not running yet")
-		fmt.Println("    Run this installer with -check for the details.")
+	// There is no background helper any more: the game fetches, unzips and
+	// truncates for itself, and song previews come from the web relay. All an
+	// upgrade over an old install has to say is that the old machinery went.
+	if len(res.Helper.Removed) > 0 {
+		fmt.Println("  Old helper:     removed (" + strings.Join(res.Helper.Removed, ", ") + ")")
 	}
 
 	// Say which of the three things is wrong. The old message covered a
@@ -388,30 +361,6 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	fmt.Println()
 	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, above Exit.\n", branding.MenuLabel)
 	return 0
-}
-
-// printAutostart says what will start the helper next time, and -- the part
-// that matters on a cabinet -- what that mechanism needs before it fires.
-func printAutostart(s installer.AutostartStatus) {
-	if s.Mechanism == installer.MechNone {
-		fmt.Println("    WARNING: nothing is registered to start it again, so it will")
-		fmt.Println("    stop working when this machine restarts.")
-		return
-	}
-	fmt.Printf("    starts via a %s\n", s.Mechanism)
-	fmt.Printf("      %s\n", s.Path)
-	switch s.Starts {
-	case installer.StartsAtBoot:
-		fmt.Println("      at boot -- no login needed")
-	case installer.StartsOnLogin:
-		fmt.Println("      when this account logs in (automatic logon counts)")
-	default:
-		fmt.Println("      only once a DESKTOP session starts, so a cabinet that boots")
-		fmt.Println("      straight into the game will not start it")
-	}
-	for _, line := range wrap(s.Note, 66) {
-		fmt.Println("      " + line)
-	}
 }
 
 // wrap breaks a sentence at word boundaries so a note reads as prose in the
@@ -475,51 +424,40 @@ func runCheck(target string) int {
 	// one "the allowlist does not look right" sent people to re-run the
 	// installer when the real problem was that no Preferences.ini existed.
 	if ok, why := installer.AllowlistState(inst.SaveDir); ok {
-		fmt.Println("  Allowlist:      ok (127.0.0.1 allowed, HttpEnabled=1)")
+		fmt.Printf("  Allowlist:      ok (%d hosts allowed, HttpEnabled=1)\n", len(installer.Hosts))
 	} else {
 		problems++
 		fmt.Println("  Allowlist:      NOT SET")
 		fmt.Printf("    %s\n", why)
 	}
 
-	// Installed, running, and reachable are three different things, and only
-	// the last is what the game cares about.
-	switch {
-	case !installer.HelperInstalled(inst):
+	// The machinery an older version ran in the background. Its presence is
+	// not a fault -- the next install run sweeps it -- but it is worth a
+	// line, because a scheduled task pointing at a deleted binary is the
+	// kind of thing that otherwise gets discovered by accident years on.
+	leftovers := installer.AutostartInfo(inst)
+	if leftovers.Mechanism != installer.MechNone {
 		problems++
-		fmt.Println("  Local helper:   NOT INSTALLED")
-		fmt.Printf("    expected at %s\n", installer.HelperBinary(inst))
-		fmt.Println("    Re-run this installer.")
-	case installer.HelperRunning(inst):
-		fmt.Println("  Local helper:   running and answering on loopback")
-	case installer.HelperWaiting(inst):
-		fmt.Println("  Local helper:   running, waiting for ITGmania to start")
-		fmt.Println("    It opens its loopback socket when the game does and gives")
-		fmt.Println("    it up when the game closes, so nothing is listening now.")
-	default:
+		fmt.Printf("  Old helper:     its %s is still registered\n", leftovers.Mechanism)
+		fmt.Println("    Run this installer once to take it away.")
+	} else if installer.HelperBinaryPresent(inst) {
 		problems++
-		fmt.Println("  Local helper:   installed, but NOT ANSWERING")
-		fmt.Printf("    binary:  %s\n", installer.HelperBinary(inst))
-		if cfg, err := os.Stat(installer.HelperConfigPath(inst)); err == nil {
-			fmt.Printf("    config:  %s (written %s)\n",
-				installer.HelperConfigPath(inst), cfg.ModTime().Format("2006-01-02 15:04:05"))
-			fmt.Println("    It published a config and then stopped or was killed.")
-			fmt.Println("    Run it in the foreground to see why:")
-		} else {
-			fmt.Printf("    config:  none at %s\n", installer.HelperConfigPath(inst))
-			fmt.Println("    It has never started successfully. Run it by hand to see why:")
-		}
-		fmt.Printf("      %s -helper -install-dir %s\n",
-			installer.HelperBinary(inst), inst.Root)
+		fmt.Println("  Old helper:     its binary is still on disk")
+		fmt.Println("    Run this installer once to take it away.")
+	} else {
+		fmt.Println("  Old helper:     none -- the game does everything itself")
 	}
 
-	// Nothing registered is always wrong. Needing a desktop session is only
-	// wrong when this machine could do better -- on a plain desktop with no
-	// systemd it is the right answer, and failing there would be crying wolf.
-	status := installer.AutostartInfo(inst)
-	printAutostart(status)
-	if status.Mechanism == installer.MechNone || status.Upgradable {
-		problems++
+	// The preview relay: not required for browsing, downloading or deleting,
+	// but song previews and single-song installs come through it.
+	relay := installer.RelayBase(inst)
+	if installer.RelayReachable(relay) {
+		fmt.Printf("  Preview relay:  answering at %s\n", relay)
+	} else {
+		fmt.Printf("  Preview relay:  NOT reachable at %s\n", relay)
+		fmt.Println("    Browsing, downloads and deletion work without it; song")
+		fmt.Println("    previews and single-song installs do not. Start it, or put")
+		fmt.Println("    its URL in Save/ITGmaniaContentBrowser/webapp.txt.")
 	}
 
 	fmt.Println()

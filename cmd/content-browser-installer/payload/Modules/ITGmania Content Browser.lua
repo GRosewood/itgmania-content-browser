@@ -116,7 +116,7 @@ local PARTS = {
 	"10 pack page.lua",           -- fetching one pack's own page
 
 	-- This machine: what is already here, and what can be heard.
-	"11 library.lua",             -- the songs folder, pack sync, the helper service
+	"11 library.lua",             -- the songs folder, pack sync, the preview relay
 	"12 sound.lua",               -- song previews and the chart preview
 	"13 installed.lua",           -- which packs are already installed
 

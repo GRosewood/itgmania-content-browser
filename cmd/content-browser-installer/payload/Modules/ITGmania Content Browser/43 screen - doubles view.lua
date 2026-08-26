@@ -118,8 +118,8 @@ function CB.Screen.DoublesView(ui)
 					-- neither road reached itgdb.net: it is not on the
 					-- allowlist and the helper is not there to relay for it
 					self:settext("itgdb.net cannot be reached -- it is not"
-						.. " allowlisted and the helper is not running."
-						.. "  Run the installer again to fix either.")
+						.. " on this machine's allowlist."
+						.. "  Run the installer again to fix that.")
 				elseif Building() then
 					self:settext("")
 				else

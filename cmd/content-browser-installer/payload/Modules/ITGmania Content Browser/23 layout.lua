@@ -16,7 +16,6 @@ local DedicatedDoubles     = CB.DedicatedDoubles
 local FEAT                 = CB.FEAT
 local FetchDetail          = CB.FetchDetail
 local FormatBytes          = CB.FormatBytes
-local HelperUrl            = CB.HelperUrl
 local InBrowsingMode       = CB.InBrowsingMode
 local InLevelView          = CB.InLevelView
 local InYearView           = CB.InYearView
@@ -24,6 +23,7 @@ local InstalledPage        = CB.InstalledPage
 local InstalledPages       = CB.InstalledPages
 local LEVEL                = CB.LEVEL
 local LO                   = CB.LO
+local WebBase              = CB.WebBase
 local NetworkBlockedReason = CB.NetworkBlockedReason
 local PackTypeOf           = CB.PackTypeOf
 local Refresh              = CB.Refresh
@@ -450,44 +450,11 @@ function LO.DetailLost(pack)
 	return not DetailInFlight(pack.id)
 end
 
--- How much room is left where packs land.
---
--- The game cannot answer this: Lua can read a file and nothing else, and the
--- folder packs go to is a preference the helper resolves. So the helper is
--- asked, and the answer is kept for a short while -- a download that just
--- finished has changed it, and a reader flicking through a list has not.
---
--- Nothing waits on it. The answer is used when it is there and the download
--- goes ahead when it is not, because a disk that cannot be measured is not a
--- reason to refuse somebody their pack.
-LO.SPACE_FOR = 20      -- seconds an answer is good for
-
-function LO.SpaceAsk()
-	if not (state.open and state.helper and state.helper.config) then return end
-	local now = GetTimeSinceStart()
-	if state.spaceAt and (now - state.spaceAt) < LO.SPACE_FOR then return end
-	if state.spaceAsking then return end
-	local url = HelperUrl("/space")
-	if not url or not NETWORK:IsUrlAllowed(url) then return end
-
-	state.spaceAsking = true
-	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = state.helper.config.token },
-		connectTimeout = 3,
-		transferTimeout = 8,
-		onResponse = function(response)
-			state.spaceAsking = false
-			if state.retired or response.error ~= nil then return end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if not ok or type(data) ~= "table" then return end
-			state.spaceFree = tonumber(data.free)
-			state.spaceRoot = data.root
-			state.spaceAt = GetTimeSinceStart()
-			Refresh()
-		end,
-	}
-end
+-- The free-space gate went with the helper that measured it: the game's Lua
+-- has no way to ask a disk anything, so a download now proceeds and a full
+-- disk fails it honestly partway instead of being predicted. SpaceFor keeps
+-- its shape -- with nothing ever measured it always answers yes -- so its
+-- callers did not have to learn anything.
 
 -- Is there room for this pack, and what to say when there is not.
 --
@@ -513,20 +480,12 @@ function LO.PackIniAsk(pack)
 	state.packIni = state.packIni or {}
 	if state.packIni[pack.id] ~= nil then return end
 
-	local h = state.helper
-	if not (h and h.config) then return end
-	local url = HelperUrl("/packini")
-	if not url or not NETWORK:IsUrlAllowed(url) then return end
+	local url = WebBase() .. "/api/packini/" .. tostring(math.floor(pack.id))
+	if not NETWORK:IsUrlAllowed(url) then return end
 
 	state.packIni[pack.id] = { status = "asking" }
 	NETWORK:HttpRequest{
 		url = url,
-		method = "POST",
-		body = '{"pack":' .. tostring(math.floor(pack.id)) .. '}',
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"] = "application/json",
-		},
 		connectTimeout = 5,
 		transferTimeout = 30,
 		onResponse = function(response)

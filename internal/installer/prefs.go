@@ -10,24 +10,40 @@ import (
 	"time"
 )
 
-// Hosts added to ITGmania's allowlist: one entry, the loopback helper.
-//
-// It used to be seven -- stepmaniaonline.net, arrowcloud.dance, itgdb.net and
-// their wildcard forms -- because the game read those sites directly. The
-// helper now relays them: the browser asks 127.0.0.1 for an outside URL, and
-// the helper -- which can reach anything but agrees to reach only those three
-// hosts -- fetches it. So the one line the game's allowlist needs is the one
-// that makes the helper reachable, and Preferences.ini is touched as lightly
-// as it can be.
-//
-// The module still prefers a direct request wherever the machine's allowlist
-// happens to permit one (installs upgraded from the seven-entry days keep
-// their entries and keep going direct), and the manual Enable Network Access
-// scripts still write the full list, because a hand-copied install has no
-// helper to relay for it.
+// Hosts added to ITGmania's allowlist. The game reads all of these directly:
+// NETWORK:HttpRequest streams pack downloads to disk, FILEMAN:Unzip lands
+// them in /Songs, and the preview relay serves song samples the engine can
+// write byte-for-byte. Nothing local relays anything any more.
 var Hosts = []string{
-	"127.0.0.1",
+	// The catalogue, pack pages and downloads. The browser now fetches these
+	// itself: NETWORK:HttpRequest streams a pack straight to disk and
+	// FILEMAN:Unzip lands it in /Songs, so there is nothing left for a local
+	// relay to carry.
+	"stepmaniaonline.net",
+	"*.stepmaniaonline.net",
+	// What people are actually playing, and the doubles-pack category.
+	"arrowcloud.dance",
+	"*.arrowcloud.dance",
+	"itgdb.net",
+	"*.itgdb.net",
+	// The song-preview relay. In development it runs beside the game and is
+	// reached through localhost -- which resolves to ::1 on Windows, where
+	// WSL's port forwarding actually listens, so this entry is NOT redundant
+	// with 127.0.0.1: the engine matches allowlist entries against the URL's
+	// host as a string, and "localhost" and "127.0.0.1" are different strings.
+	"localhost",
+	// The in-game updater: the manifest lives on raw.githubusercontent.com
+	// and the module archive on github.com, whose download redirects land on
+	// objects.githubusercontent.com -- the wildcard covers both content hosts.
+	"github.com",
+	"*.githubusercontent.com",
 }
+
+// Both the bare host and the wildcard are listed on purpose. The engine's
+// IsUrlAllowed treats "*.example.com" as a suffix match that REQUIRES at least
+// one leading label, so it matches api.example.com and never example.com
+// itself. Listing only the wildcard would silently fail for the bare domain,
+// and listing only the bare one would fail for every subdomain.
 
 // PrefsResult describes what EnsureAllowlist did.
 type PrefsResult struct {
@@ -297,7 +313,8 @@ func AllowlistState(saveDir string) (ok bool, reason string) {
 		}
 		return false, "cannot read " + path + ": " + err.Error()
 	}
-	enabled, allowed := false, false
+	enabled := false
+	present := map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(raw))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -310,19 +327,31 @@ func AllowlistState(saveDir string) (ok bool, reason string) {
 			enabled = value == "1"
 		case "httpallowhosts":
 			for _, h := range strings.Split(value, ",") {
-				if strings.EqualFold(strings.TrimSpace(h), Hosts[0]) {
-					allowed = true
-				}
+				present[strings.ToLower(strings.TrimSpace(h))] = true
 			}
 		}
 	}
+	// Every host, not just the first. The browser reaches the catalogue, the
+	// pack downloads and two smaller services directly now, so a file carrying
+	// some of them and not others is a browser that half works -- and calling
+	// that "ok" because one entry matched is how a partial allowlist gets
+	// mistaken for a network fault.
+	var missing []string
+	for _, h := range Hosts {
+		if !present[strings.ToLower(h)] {
+			missing = append(missing, h)
+		}
+	}
+
 	switch {
-	case !enabled && !allowed:
-		return false, "HttpEnabled is not 1 and " + Hosts[0] + " is not in HttpAllowHosts"
+	case !enabled && len(missing) > 0:
+		return false, "HttpEnabled is not 1, and HttpAllowHosts is missing " +
+			strings.Join(missing, ", ")
 	case !enabled:
 		return false, "HttpEnabled is not 1 (the hosts are fine)"
-	case !allowed:
-		return false, Hosts[0] + " is not in HttpAllowHosts (HttpEnabled is fine)"
+	case len(missing) > 0:
+		return false, "HttpAllowHosts is missing " + strings.Join(missing, ", ") +
+			" (HttpEnabled is fine)"
 	}
 	return true, ""
 }

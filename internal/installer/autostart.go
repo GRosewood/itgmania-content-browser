@@ -3,11 +3,8 @@ package installer
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -116,95 +113,6 @@ func HelperBinary(inst Install) string {
 	return filepath.Join(HelperDir(inst), name)
 }
 
-// InstallHelperBinary copies the running installer to the helper location, so
-// the helper does not depend on where the installer was run from.
-func InstallHelperBinary(inst Install) (string, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("locating this program: %w", err)
-	}
-	self, err = filepath.EvalSymlinks(self)
-	if err != nil {
-		return "", err
-	}
-	dest := HelperBinary(inst)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return "", err
-	}
-	// This directory lives inside the player's profile, and the helper writes
-	// its port and token into it every time it starts. Created by root it
-	// stayed root-owned, so the helper that starts at boot -- as the player --
-	// could not publish anything, and the game had no way to reach it.
-	chownToGameUser(filepath.Dir(dest), inst.GameUser)
-	data, err := os.ReadFile(self)
-	if err != nil {
-		return "", err
-	}
-	// Windows refuses to delete or overwrite a running executable, and an old
-	// helper may still be shutting down. Renaming it out of the way is allowed
-	// even while it runs, so upgrades never fail on a live process.
-	if isFile(dest) {
-		if err := renameAside(dest); err != nil {
-			return "", fmt.Errorf("replacing %s: %w", dest, err)
-		}
-	}
-	if err := os.WriteFile(dest, data, 0o755); err != nil {
-		return "", fmt.Errorf("writing %s: %w", dest, err)
-	}
-	chownToGameUser(dest, inst.GameUser)
-	// A config left by a helper that ran as somebody else is unwritable to the
-	// one about to start, and stale besides.
-	_ = os.Remove(HelperConfigPath(inst))
-	return dest, nil
-}
-
-// renameAside moves a (possibly running) executable out of the way. Windows
-// allows renaming a live image but not deleting or overwriting it, so an
-// upgrade renames rather than replaces. A suffix is tried until one is free,
-// because a previous aside may still be held by a process that is exiting.
-func renameAside(path string) error {
-	if err := os.Remove(path); err == nil {
-		return nil
-	}
-	for i := 0; i < 20; i++ {
-		stale := fmt.Sprintf("%s.old%d", path, i)
-		if isFile(stale) {
-			if os.Remove(stale) != nil {
-				continue // still locked; try the next name
-			}
-		}
-		if err := os.Rename(path, stale); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("could not move the running helper out of the way")
-}
-
-// helperArgs is the command line the login item runs.
-func helperArgs(inst Install) []string {
-	return []string{"-helper", "-install-dir", inst.Root}
-}
-
-// StartHelper launches the helper now, so the feature works without a reboot.
-func StartHelper(inst Install) error {
-	bin := HelperBinary(inst)
-	if !isFile(bin) {
-		return fmt.Errorf("helper binary not installed")
-	}
-	cmd := exec.Command(bin, helperArgs(inst)...)
-	cmd.Dir = HelperDir(inst)
-	detachProcess(cmd)
-	// Started as the player, not as root. A root helper writes root-owned
-	// files into their profile and holds the port the game will look for, so
-	// the first thing that starts correctly at boot cannot take over.
-	runAsGameUser(cmd, inst.GameUser)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	// Nothing waits on it; releasing avoids leaving a zombie behind us.
-	return cmd.Process.Release()
-}
-
 // StopHelper asks a running helper to exit and waits for it to let go of its
 // executable. Removing the config is the signal; the helper notices within its
 // poll interval. Waiting matters because the caller is usually about to replace
@@ -255,108 +163,14 @@ func RemoveHelperBinary(inst Install) bool {
 	}
 }
 
-// HelperInstalled reports whether this install has a helper binary at all.
-func HelperInstalled(inst Install) bool { return isFile(HelperBinary(inst)) }
-
-// HelperWaiting reports the helper being up but deliberately holding no socket
-// because ITGmania is not running.
-//
-// It is a state, not a fault, and the difference matters: on Windows this is
-// what the helper looks like almost all the time, and reporting it as "not
-// answering" would put a scary line in front of every player whose game happens
-// to be closed -- which is every player running this check.
-//
-// A port of zero is how the helper says so. It publishes one on purpose rather
-// than withdrawing the file, so that this question has an answer at all.
-func HelperWaiting(inst Install) bool {
-	raw, err := os.ReadFile(filepath.Join(HelperDir(inst), "helper.json"))
-	if err != nil {
-		return false
-	}
-	var cfg struct {
-		Port int `json:"port"`
-	}
-	return json.Unmarshal(raw, &cfg) == nil && cfg.Port == 0
-}
-
-// HelperRunning asks the helper itself whether it is there.
-//
-// The config file existing is not the same question: it outlives a crash, and a
-// stale one is exactly the state that leaves a browser mysteriously dead. So
-// this does what the game does -- read the port and token the helper published,
-// and call /health over loopback.
-func HelperRunning(inst Install) bool {
-	raw, err := os.ReadFile(filepath.Join(HelperDir(inst), "helper.json"))
-	if err != nil {
-		return false
-	}
-	var cfg struct {
-		Port  int    `json:"port"`
-		Token string `json:"token"`
-	}
-	if json.Unmarshal(raw, &cfg) != nil || cfg.Port <= 0 {
-		return false
-	}
-	req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port), nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("X-Browser-Token", cfg.Token)
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode == http.StatusOK
-}
-
-// RegisterAutostart makes the helper start on its own from now on.
-func RegisterAutostart(inst Install) error { return registerAutostart(inst) }
-
 // UnregisterAutostart removes whatever RegisterAutostart put in place --
 // including the mechanisms older versions used, which is why uninstall clears
 // more than it ever registers.
 func UnregisterAutostart(inst Install) error { return unregisterAutostart(inst) }
-
-// AutostartDescription names where this install's registration lives.
-func AutostartDescription(inst Install) string { return autostartDescription(inst) }
 
 // HelperConfigPath is where the helper publishes its port and token. Its
 // presence and age separate "never started" from "started once and stopped",
 // which need different answers.
 func HelperConfigPath(inst Install) string {
 	return filepath.Join(HelperDir(inst), "helper.json")
-}
-
-// HelperCommand is the line to add to whatever launches ITGmania, for a
-// machine where nothing else will start the helper.
-//
-// This is the last resort and it is a real one: a cabinet that boots straight
-// into the game logs nobody in, so no per-user service manager ever runs, and
-// on a read-only image lingering cannot be turned on either. Starting the
-// helper beside the game is then the only thing left -- and the install
-// directory has to be spelled out, because without it the helper falls back to
-// discovery and can pick a different install than the one being launched.
-func HelperCommand(inst Install) string {
-	return quoteArg(HelperBinary(inst)) + " -helper -install-dir " +
-		quoteArg(inst.Root) + " &"
-}
-
-// quoteArg wraps a path in double quotes when it needs them, so the printed
-// line can be pasted into a shell script unchanged.
-func quoteArg(s string) string {
-	// The characters a POSIX shell would treat as anything other than text.
-	const special = " \t\"'\\$`"
-	if s != "" && !strings.ContainsAny(s, special) {
-		return s
-	}
-	// Inside double quotes a shell still expands $ and backticks and honours
-	// a backslash, so those four are the ones that have to be escaped.
-	esc := strings.NewReplacer(
-		`\`, `\\`,
-		`"`, `\"`,
-		`$`, `\$`,
-		"`", "\\`",
-	)
-	return `"` + esc.Replace(s) + `"`
 }

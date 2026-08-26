@@ -9,20 +9,18 @@ local CB = ...
 
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
-local CheckHelper      = CB.CheckHelper
 local DL               = CB.DL
 local LO               = CB.LO
 local PlaySfx          = CB.PlaySfx
 local Toast            = CB.Toast
+local WebBase          = CB.WebBase
 local refs             = CB.refs
-local HelperUrl        = CB.HelperUrl
-local LoadHelperConfig = CB.LoadHelperConfig
 local NormalizeName    = CB.NormalizeName
 local Refresh          = CB.Refresh
+local RAGEFILE_WRITE   = CB.RAGEFILE_WRITE
 local SMO_BASE         = CB.SMO_BASE
 local ScanInstalled    = CB.ScanInstalled
 local Sync             = CB.Sync
-local TidyProbeFiles   = CB.TidyProbeFiles
 local state            = CB.state
 
 -- Download and unpack through the engine, into whichever song folder it
@@ -107,10 +105,6 @@ local function EngineDownload(pack, dl)
 				-- exactly what the installed list flags amber.
 				state.autoSync[NormalizeName(pack.name)] =
 					(pack.date ~= nil and pack.date ~= "") and pack.date or "installed"
-				-- the unzip will have littered the new pack with empty probe
-				-- files; clear them before anybody looks in the folder
-				CheckHelper()
-				TidyProbeFiles()
 				if not state.open then
 					SCREENMAN:SystemMessage("Pack installed: " .. pack.name .. " (reload songs to play)")
 				end
@@ -147,9 +141,7 @@ local function StartDownload(pack)
 	end
 	if not queued then state.dlOrder[#state.dlOrder+1] = pack.id end
 
-	if not DL.StartViaHelper(pack, dl) then
-		EngineDownload(pack, dl)
-	end
+	EngineDownload(pack, dl)
 end
 
 -- true once a completed download's new group is actually loaded in SONGMAN
@@ -169,212 +161,107 @@ local function DownloadsActive()
 	return false
 end
 
--- ------------------------------------------------- installing via the helper
---
--- Defined here rather than beside the rest of DL because it needs the helper
--- client below it in the file; DL is a table, so its methods can be added
--- wherever the things they call are in scope.
+-- ------------------------------------------------- installing one song
 
--- Ask the helper to install a pack. Returns whether it took the job.
-function DL.StartViaHelper(pack, dl)
-	local h = state.helper
-	if not h.config then h.config = LoadHelperConfig() end
-	if not h.config then return false end
-	local id = tonumber(pack.id)
-	if not id then return false end
-	local url = HelperUrl("/install")
-	if not NETWORK:IsUrlAllowed(url) then return false end
-
-	dl.viaHelper = true
-	dl.helperKey = "pack:" .. id
-	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = JsonEncode({ pack = id, name = pack.name }),
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"]    = "application/json",
-		},
-		connectTimeout = 5,
-		transferTimeout = 20,
-		onResponse = function(response)
-			local ok, data = pcall(JsonDecode, response.body or "")
-			local took = response.error == nil and ok
-				and type(data) == "table" and data.ok == true
-			if took then return end
-			-- The helper is installed but would not take it. Rather than leave
-			-- the player with a stuck row, hand the job to the engine and let
-			-- it land wherever it lands.
-			dl.viaHelper, dl.helperKey = nil, nil
-			EngineDownload(pack, dl)
-			Refresh()
-		end,
-	}
-	return true
-end
-
--- Ask the helper for one song out of a pack.
---
--- It lands in a "Content Browser Singles" pack chosen by the sync the source
--- pack declares, so songs that need the 9ms bias removed never share a folder
--- with songs that do not. The helper reads that from the pack's own Pack.ini
--- inside the archive, which is a better answer than anything this end knows.
+-- A single song, without the pack. The relay re-serves the song's folder as
+-- a small real archive -- the pack's own compressed bytes behind fresh
+-- headers -- because that is the one shape the engine will unzip. The zip
+-- goes to /Downloads, then Unzip lands it in the singles pack for its sync.
 function DL.StartSong(pack, song)
 	local title = type(song) == "table" and song.title or nil
 	local id = pack and tonumber(pack.id)
 	if not (id and title and title ~= "") then return false, "no song selected" end
 
-	local h = state.helper
-	if not h.config then h.config = LoadHelperConfig() end
-	if not h.config then
-		return false, "single songs need the content browser helper installed"
-	end
-	local url = HelperUrl("/single")
-	if not NETWORK:IsUrlAllowed(url) then
-		return false, "127.0.0.1 is missing from HttpAllowHosts"
+	local root = WebBase() .. "/api/songzip/" .. id .. "/" .. NETWORK:UrlEncode(title)
+	if not NETWORK:IsUrlAllowed(root) then
+		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
+		return false, host .. " is missing from HttpAllowHosts"
 	end
 
 	-- which singles pack it belongs in, decided here from what SMO says so
 	-- that the folder named in the popup is the folder it lands in
 	local smo = Sync.Smo(pack)
 	local sync = (smo == "null" or smo == "0") and "NULL" or "ITG"
+	local folder = "Content Browser Singles - " .. sync .. " Sync"
 
 	local key = "song:" .. id .. ":" .. title
 	for _, existing in pairs(state.downloads) do
-		if existing.helperKey == key and existing.status ~= "error" then
+		if existing.songKey == key and existing.status ~= "error" then
 			return false, "that song is already on its way"
 		end
 	end
 
 	local dl = {
 		status = "active", cur = 0, total = 0,
-		name = title, single = true,
-		viaHelper = true, helperKey = key,
+		name = title, single = true, songKey = key,
+		sync = sync,
 	}
 	state.downloads[key] = dl
-	-- queue order, and only once: retrying a song that failed used to append
-	-- a second entry, and the strip drew the same download twice
 	local queued = false
-	for id in ivalues(state.dlOrder) do
-		if id == key then queued = true end
+	for existing in ivalues(state.dlOrder) do
+		if existing == key then queued = true end
 	end
 	if not queued then state.dlOrder[#state.dlOrder+1] = key end
 
+	DL.singleSeq = (DL.singleSeq or 0) + 1
+	local zipname = "cb-single-" .. DL.singleSeq .. ".zip"
 	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = JsonEncode({ pack = id, song = title, sync = sync }),
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"]    = "application/json",
-		},
-		connectTimeout = 5,
-		transferTimeout = 20,
+		url = root,
+		downloadFile = zipname,
+		connectTimeout = 10,
+		onProgress = function(current, total)
+			dl.cur = current or 0
+			if total and total > 0 then dl.total = total end
+		end,
 		onResponse = function(response)
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if response.error ~= nil or not (ok and type(data) == "table" and data.ok) then
+			if response.error ~= nil or response.statusCode ~= 200 then
 				dl.status = "error"
-				dl.msg = (ok and type(data) == "table" and data.error)
-					or "the helper would not take it"
+				dl.msg = response.errorMessage or ("HTTP " .. tostring(response.statusCode))
 				Refresh()
+				return
 			end
+			-- Unzip must run inside onResponse: the engine deletes the
+			-- downloaded file when this callback returns.
+			dl.status = "installing"
+			local dest = "/Songs/" .. folder .. "/"
+			if not FILEMAN:Unzip("/Downloads/" .. zipname, dest, 0) then
+				dl.status = "error"
+				dl.msg = "unzip failed"
+				Refresh()
+				return
+			end
+
+			-- The singles pack declares its sync once, so every song in it
+			-- plays at the offset it was authored for.
+			if not FILEMAN:DoesFileExist(dest .. "Pack.ini") then
+				local nl = string.char(10)
+				local f = RageFileUtil:CreateRageFile()
+				if f:Open(dest .. "Pack.ini", RAGEFILE_WRITE) then
+					f:Write("[Group]" .. nl
+						.. "# Written by the ITGmania Content Browser." .. nl
+						.. "# Songs downloaded one at a time land here, grouped by the" .. nl
+						.. "# sync they were authored with, so this offset is right for" .. nl
+						.. "# every song in it." .. nl
+						.. "Version=1" .. nl
+						.. "SyncOffset=" .. sync .. nl)
+					f:Close()
+				end
+				f:destroy()
+			end
+
+			dl.status = "done"
+			dl.finishedAt = GetTimeSinceStart()
+			dl.groups = { folder }
+			state.needsReload = true
+			state.reloadSongs = state.reloadSongs + 1
+			if state.open and state.mode == "installed" then ScanInstalled() end
+			if not state.open then
+				SCREENMAN:SystemMessage("Song installed: " .. title .. " (reload songs to play)")
+			end
+			Refresh()
 		end,
 	}
 	return true
-end
-
--- is anything waiting on the helper right now?
-function DL.Watching()
-	for _, dl in pairs(state.downloads) do
-		if dl.viaHelper and (dl.status == "active" or dl.status == "installing") then
-			return true
-		end
-	end
-	return false
-end
-
--- Read where the helper's installs have got to, and fold that into the queue.
--- The rows the header draws come from state.downloads either way, so nothing
--- downstream has to know which route a pack took.
-function DL.Poll()
-	local h = state.helper
-	if not h.config or DL.polling then return end
-	local url = HelperUrl("/install/progress")
-	if not NETWORK:IsUrlAllowed(url) then return end
-
-	DL.polling = true
-	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = h.config.token },
-		connectTimeout = 3,
-		transferTimeout = 8,
-		onResponse = function(response)
-			DL.polling = false
-			if response.error ~= nil then return end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if not ok or type(data) ~= "table" or type(data.installs) ~= "table" then
-				return
-			end
-			local changed = false
-			for job in ivalues(data.installs) do
-				-- matched on the id the job was started with, because the
-				-- catalogue hands out ids as strings and the helper as numbers
-				for _, dl in pairs(state.downloads) do
-					if dl.helperKey and dl.helperKey == job.key then
-						changed = DL.Apply(dl, job) or changed
-					end
-				end
-			end
-			if changed then Refresh() end
-		end,
-	}
-end
-
--- one job's state, folded onto the row that is drawing it
-function DL.Apply(dl, job)
-	local before = dl.status .. tostring(dl.cur)
-	dl.cur = tonumber(job.done) or dl.cur
-	if tonumber(job.total) and tonumber(job.total) > 0 then
-		dl.total = tonumber(job.total)
-	end
-	dl.root = job.root
-	if job.sync and job.sync ~= "" then dl.sync = job.sync end
-
-	local phase = tostring(job.phase or "")
-	if phase == "downloading" then
-		dl.status = "active"
-	elseif phase == "unpacking" then
-		dl.status = "installing"
-	elseif phase == "failed" then
-		dl.status = "error"
-		dl.msg = tostring(job.error or "install failed")
-	elseif phase == "done" and dl.status ~= "done" then
-		dl.status = "done"
-		dl.finishedAt = GetTimeSinceStart()
-		dl.groups = {}
-		if type(job.groups) == "table" then
-			for g in ivalues(job.groups) do dl.groups[#dl.groups+1] = g end
-		end
-		state.needsReload = true
-		-- a single is not a pack, so it is not something to remember the
-		-- arrival date of, and its folder already exists
-		if dl.single then
-			state.reloadSongs = state.reloadSongs + 1
-		else
-			state.reloadPacks = state.reloadPacks + 1
-			DL.Remember(dl.name)
-		end
-		-- so the assumed-sync pass writes this pack a Pack.ini
-		state.autoSync[NormalizeName(dl.name)] = "installed"
-		-- Standing on the Installed tab while this landed? Then the list in
-		-- front of the reader is the one thing that ought to show it, and it is
-		-- only rebuilt on the way in. Rebuild it where they are.
-		if state.open and state.mode == "installed" then ScanInstalled() end
-		if not state.open then
-			SCREENMAN:SystemMessage("Pack installed: " .. dl.name .. " (reload songs to play)")
-		end
-	end
-	return before ~= (dl.status .. tostring(dl.cur))
 end
 
 function DL.Forget(pack)

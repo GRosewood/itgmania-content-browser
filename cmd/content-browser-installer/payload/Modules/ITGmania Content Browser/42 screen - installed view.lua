@@ -53,9 +53,6 @@ function CB.Screen.InstalledView(ui)
 			if #inst.packs > INST_ROWS then
 				label = label .. LO.InstPageText()
 			end
-			if state.helper.status == "absent" then
-				label = label .. "   -   removal unavailable"
-			end
 			self:settext(label)
 			self:diffuse(AccentColor())
 		end,

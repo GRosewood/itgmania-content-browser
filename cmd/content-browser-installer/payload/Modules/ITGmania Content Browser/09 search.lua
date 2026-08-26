@@ -182,22 +182,15 @@ VerifyNext = function(acc)
 	end
 	if acc.verified >= SEARCH.VERIFY_MAX then return end
 
-	local h = state.helper
-	local url = CB.HelperUrl and CB.HelperUrl("/credits")
-	if not (url and h and h.config and NETWORK:IsUrlAllowed(url)) then return end
+	local url = CB.WebBase and (CB.WebBase() .. "/api/credits/" .. item.id)
+	if not (url and NETWORK:IsUrlAllowed(url)) then return end
 
 	acc.verifyBusy = true
 	acc.verified = acc.verified + 1
 	NETWORK:HttpRequest{
 		url = url,
-		method = "POST",
-		body = '{"pack":' .. item.id .. '}',
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"] = "application/json",
-		},
 		connectTimeout = 5,
-		-- a large pack is many ranged reads; give the helper room
+		-- a large pack is many ranged reads; give the relay room
 		transferTimeout = 120,
 		onResponse = function(response)
 			acc.verifyBusy = false

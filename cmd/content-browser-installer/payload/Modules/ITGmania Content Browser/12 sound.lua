@@ -9,13 +9,13 @@ local CB = ...
 
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
+local BROWSER_DATA_DIR = CB.BROWSER_DATA_DIR
 local CACHE_DIR        = CB.CACHE_DIR
 local Clamp            = CB.Clamp
-local HelperUrl        = CB.HelperUrl
-local LoadHelperConfig = CB.LoadHelperConfig
 local PlaySfx          = CB.PlaySfx
 local Refresh          = CB.Refresh
 local Toast            = CB.Toast
+local WebBase          = CB.WebBase
 local state            = CB.state
 
 -- A sample of a song, played from the pack's own audio.
@@ -44,10 +44,10 @@ Snd.token   = 0       -- generation, so a late reply for an abandoned song is dr
 Snd.bpm     = 0       -- the song's tempo, so something on screen can move with it
 Snd.startedAt = 0     -- when playback began, for both the beat and the run-out
 Snd.len     = 0       -- how long the sample runs
-Snd.prog    = nil     -- {phase, frac} while the helper is still fetching
+Snd.prog    = nil     -- {phase, frac} while the sample is still fetching
 Snd.index   = nil     -- which song in the list is playing, so the bars stay on it
 Snd.bars    = {}      -- the equalizer bars, once the tree exists
-Snd.charts  = nil     -- every difficulty of the song, from the helper
+Snd.charts  = nil     -- every difficulty of the song, from the relay
 Snd.chartIdx = 0      -- which of them is being shown
 Snd.notes   = nil     -- what that one does during the sample
 Snd.lanes   = 0       -- 4 for a singles chart, 8 for a doubles one
@@ -55,7 +55,6 @@ Snd.known   = {}      -- song title -> the difficulties a preview already found
 Snd.pick    = nil     -- the difficulty the popup is offering, while it is open
 Snd.want    = nil     -- the difficulty this attempt was asked to open on
 Snd.packId  = nil     -- which pack the playing song came from
-Snd.polling = false   -- a progress poll is in flight
 Snd.winFade = 0       -- the chart window's own fade, 0..1
 Snd.LANE_POOL = 8     -- note actors per column; a jack at 16ths fills about six
 Snd.HIT     = 0.085   -- how close to the moment a receptor counts as struck
@@ -442,7 +441,7 @@ function Snd.Stop(quiet)
 	Snd.prog, Snd.bpm, Snd.len, Snd.startedAt = nil, 0, 0, 0
 	Snd.notes, Snd.lanes, Snd.noteFrom = nil, 0, 1
 	Snd.charts, Snd.chartIdx = nil, 0
-	Snd.want, Snd.packId, Snd.polling = nil, nil, false
+	Snd.want, Snd.packId = nil, nil
 	Snd.fired, Snd.pressAt, Snd.bpmText = {}, {}, nil
 	Snd.index = nil
 	if was ~= "idle" and not quiet then Refresh() end
@@ -469,11 +468,10 @@ function Snd.Begin(sample)
 		return
 	end
 	Snd.actor:stop()
-	-- The engine addresses files through its own filesystem, where the cache
-	-- is mounted at /Cache wherever it physically lives; the helper's absolute
-	-- path would mean nothing to it. The helper extracts into the same folder
-	-- by its OS path, so the two meet in the middle.
-	Snd.actor:load(CACHE_DIR .. "previews/" .. name)
+	-- The engine addresses files through its own filesystem; the relay's
+	-- sample was downloaded into /Downloads and says so. The old helper's
+	-- cache path stays as the fallback for a sample table that predates it.
+	Snd.actor:load(sample.path or (CACHE_DIR .. "previews/" .. name))
 	local sound = Snd.actor:get()
 	if sound then
 		local from = tonumber(sample.start) or 0
@@ -518,45 +516,18 @@ function Snd.Begin(sample)
 	Snd.startedAt = GetTimeSinceStart()
 end
 
--- What the helper is doing right now, if anything. Deliberately quiet: a poll
--- that failed is not worth a message, and a poll that lands after the fetch
--- finished must not resurrect a bar over a sample that is already playing.
-function Snd.Poll()
-	if Snd.status ~= "loading" then return end
-	-- One at a time.
-	--
-	-- The engine runs one request at a time in the order they were asked for,
-	-- and the thing this is asking about is the fetch sitting in front of it.
-	-- Firing another every 0.4s only lengthens the queue the answer has to
-	-- come through -- a twenty-second extraction used to leave a backlog of
-	-- polls to drain before anything else could be asked for at all.
-	if Snd.polling then return end
-	local h = state.helper
-	if not h.config then return end
-	local url = HelperUrl("/preview/progress")
-	if not NETWORK:IsUrlAllowed(url) then return end
-	local mine = Snd.token
-	Snd.polling = true
-	NETWORK:HttpRequest{
-		url = url,
-		headers = { ["X-Browser-Token"] = h.config.token },
-		connectTimeout = 2,
-		transferTimeout = 4,
-		onResponse = function(response)
-			Snd.polling = false
-			if mine ~= Snd.token or Snd.status ~= "loading" then return end
-			if response.error ~= nil then return end
-			local ok, data = pcall(JsonDecode, response.body or "")
-			if not ok or type(data) ~= "table" then return end
-			local p = data.progress
-			if type(p) == "table" and p.active then
-				Snd.prog = { phase = tostring(p.phase or ""), frac = tonumber(p.frac) or -1 }
-			end
-		end,
-	}
-end
+
 
 -- Play a sample of one song. Asking again for the song already playing stops it.
+--
+-- The sample comes from the relay, not from a helper beside the game: the
+-- relay reads the pack zip's index on stepmaniaonline.net with ranged
+-- requests, inflates just the one song's audio, and serves it as a plain
+-- file -- which is the one kind of thing this engine can write to disk
+-- byte-for-byte. Two requests: meta first, because the download's filename
+-- must be chosen before the fetch and the sound system picks its decoder
+-- by the file's extension; then the audio itself into /Downloads, which
+-- the engine clears at every launch.
 function Snd.Play(pack, song)
 	local title = type(song) == "table" and song.title or nil
 	local id = pack and tonumber(pack.id)
@@ -564,17 +535,11 @@ function Snd.Play(pack, song)
 		PlaySfx("invalid")
 		return
 	end
-	local h = state.helper
-	if not h.config then h.config = LoadHelperConfig() end
-	if not h.config then
+	local root = WebBase() .. "/api/audio/" .. id .. "/" .. NETWORK:UrlEncode(title)
+	if not NETWORK:IsUrlAllowed(root) then
 		PlaySfx("invalid")
-		Toast("song samples need the content browser helper installed")
-		return
-	end
-	local url = HelperUrl("/preview")
-	if not NETWORK:IsUrlAllowed(url) then
-		PlaySfx("invalid")
-		Toast("127.0.0.1 is missing from HttpAllowHosts")
+		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
+		Toast(host .. " is missing from HttpAllowHosts")
 		return
 	end
 
@@ -593,36 +558,67 @@ function Snd.Play(pack, song)
 	Snd.bpmText = (type(song) == "table" and song.bpm ~= "" ) and song.bpm or nil
 	Snd.index = state.songPick
 	Snd.prog = nil
-	-- leave the fetch a clear run at the network before asking after it
-	Snd.pollAt = GetTimeSinceStart() + 0.6
 	Refresh()
 
 	NETWORK:HttpRequest{
-		url = url,
-		method = "POST",
-		body = JsonEncode({ pack = id, song = title }),
-		headers = {
-			["X-Browser-Token"] = h.config.token,
-			["Content-Type"]    = "application/json",
-		},
+		url = root .. "?meta=1",
 		connectTimeout = 5,
-		transferTimeout = 90,
+		transferTimeout = 30,
 		onResponse = function(response)
 			-- the player asked for something else, or left
 			if mine ~= Snd.token then return end
 			if response.error ~= nil then
-				Snd.status, Snd.message = "failed", "the helper is not running"
-			else
-				local ok, data = pcall(JsonDecode, response.body or "")
-				if not ok or type(data) ~= "table" then
-					Snd.status, Snd.message = "failed", "the helper sent something unreadable"
-				elseif not data.ok then
-					Snd.status, Snd.message = "failed", tostring(data.error or "no sample for this song")
-				else
-					Snd.Begin(data.sample)
-				end
+				Snd.status, Snd.message = "failed", "the preview endpoint is not reachable"
+				Refresh()
+				return
 			end
-			Refresh()
+			local ok, data = pcall(JsonDecode, response.body or "")
+			if not ok or type(data) ~= "table" or type(data.ext) ~= "string" then
+				local why = (ok and type(data) == "table" and data.error) or "no sample for this song"
+				Snd.status, Snd.message = "failed", tostring(why)
+				Refresh()
+				return
+			end
+
+			-- Everything else the window needs rides on the meta answer, the
+			-- way it used to ride on the helper's: the sample window the relay
+			-- decided (so the audio played and the notes drawn come from the
+			-- same stretch), the tempo, and every difficulty's notes.
+			local sample = {
+				start   = tonumber(data.start) or 0,
+				length  = tonumber(data.length) or 0,
+				bpm     = tonumber(data.bpm) or 0,
+				preview = data.preview and true or nil,
+				charts  = type(data.charts) == "table" and data.charts or nil,
+			}
+
+			-- a name never reused cannot collide with a file the sound
+			-- system still holds open; the engine sweeps /Downloads anyway
+			local name = "cb-prev-" .. mine .. data.ext
+			NETWORK:HttpRequest{
+				url = root,
+				downloadFile = name,
+				connectTimeout = 10,
+				transferTimeout = 300,
+				onProgress = function(current, total)
+					if mine ~= Snd.token then return end
+					if total and total > 0 then
+						Snd.prog = { phase = "downloading", frac = current / total }
+					end
+				end,
+				onResponse = function(response)
+					if mine ~= Snd.token then return end
+					if response.error ~= nil or response.statusCode ~= 200 then
+						Snd.status = "failed"
+						Snd.message = response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
+					else
+						sample.name = name
+						sample.path = "/Downloads/" .. name
+						Snd.Begin(sample)
+					end
+					Refresh()
+				end,
+			}
 		end,
 	}
 end

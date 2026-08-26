@@ -3,11 +3,8 @@
 package installer
 
 import (
-	"encoding/xml"
-	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 )
 
@@ -59,15 +56,6 @@ func taskName(inst Install) string {
 
 func isWindows() bool { return true }
 
-// detachProcess keeps the helper alive after the installer exits and stops it
-// from inheriting a console window.
-func detachProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-	}
-}
-
 func hidden(cmd *exec.Cmd) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd
@@ -100,104 +88,6 @@ func currentUser() string {
 	return domain + `\` + name
 }
 
-// taskXML builds the task definition.
-//
-// Every field that matters is set rather than inherited: ExecutionTimeLimit is
-// PT0S because the default kills a long-running task after 72 hours, and the
-// helper is meant to outlive any session. The battery settings matter for a
-// laptop and cost nothing on a cabinet.
-func taskXML(inst Install) (string, error) {
-	who := currentUser()
-	if who == "" {
-		return "", fmt.Errorf("could not determine the current user")
-	}
-	esc := func(s string) string {
-		var b strings.Builder
-		_ = xml.EscapeText(&b, []byte(s))
-		return b.String()
-	}
-	args := make([]string, 0, len(helperArgs(inst)))
-	for _, a := range helperArgs(inst) {
-		if strings.ContainsAny(a, " \t") {
-			a = `"` + a + `"`
-		}
-		args = append(args, a)
-	}
-	return `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>Runs the ITGMania Content Browser helper, which the in-game browser needs.</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <UserId>` + esc(who) + `</UserId>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>` + esc(who) + `</UserId>
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Enabled>true</Enabled>
-    <Hidden>true</Hidden>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>3</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>` + esc(HelperBinary(inst)) + `</Command>
-      <Arguments>` + esc(strings.Join(args, " ")) + `</Arguments>
-      <WorkingDirectory>` + esc(HelperDir(inst)) + `</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>
-`, nil
-}
-
-// registerTask writes the definition and hands it to schtasks.
-//
-// The file has to be UTF-16: schtasks reads /XML as UTF-16 and rejects UTF-8
-// with a parse error that names the first byte rather than the encoding.
-func registerTask(inst Install) error {
-	body, err := taskXML(inst)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp("", "itgmania-cb-task-*.xml")
-	if err != nil {
-		return err
-	}
-	path := tmp.Name()
-	defer func() { _ = os.Remove(path) }()
-
-	if _, err := tmp.Write(utf16LE(body)); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-
-	out, err := hidden(exec.Command("schtasks", "/Create",
-		"/TN", taskName(inst), "/XML", path, "/F")).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
 // utf16LE encodes with a BOM, which is what schtasks expects. The input is
 // ASCII apart from whatever is in a path, and Go strings are UTF-8, so this
 // walks runes and emits surrogate pairs for anything outside the BMP.
@@ -214,47 +104,6 @@ func utf16LE(s string) []byte {
 		put(uint16(r))
 	}
 	return out
-}
-
-// registerAutostart prefers the scheduled task and keeps the Run value as the
-// fallback.
-//
-// The order matters more than it looks. The task is created and then CONFIRMED
-// before the Run value is removed, because a machine that ends up with neither
-// has a browser that will not open -- and a locked-down image that refuses task
-// creation is exactly the kind of machine where nobody would notice until the
-// cabinet was back on the floor. Belt and braces are cheap here; two registered
-// mechanisms would only ever start one helper anyway, because the second copy
-// sees the first one's config and exits.
-func registerAutostart(inst Install) error {
-	removeRunValue(legacyRunValue)
-
-	err := registerTask(inst)
-	if err == nil && taskPresent(inst) {
-		// the task is real and the scheduler agrees; the old mechanism can go
-		removeRunValue(runValueFor(inst))
-		return nil
-	}
-
-	// Either the scheduler refused, or it accepted and then could not show us
-	// the task. Both leave the Run value as the only thing worth relying on.
-	if rerr := registerRunValue(inst); rerr != nil {
-		if err != nil {
-			return fmt.Errorf("scheduled task refused (%v) and the fallback failed: %w", err, rerr)
-		}
-		return rerr
-	}
-	return nil
-}
-
-func registerRunValue(inst Install) error {
-	quoted := `"` + HelperBinary(inst) + `" ` + strings.Join(quoteAll(helperArgs(inst)), " ")
-	out, err := hidden(exec.Command("reg", "add", runKey, "/v", runValueFor(inst),
-		"/t", "REG_SZ", "/d", quoted, "/f")).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("registering login item: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 func unregisterAutostart(inst Install) error {
@@ -290,20 +139,4 @@ func autostartInfo(inst Install) AutostartStatus {
 		}
 	}
 	return AutostartStatus{Mechanism: MechNone, Starts: StartsOnDesktopSession}
-}
-
-func autostartDescription(inst Install) string {
-	return autostartInfo(inst).Path
-}
-
-func quoteAll(args []string) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		if strings.ContainsAny(a, " \t") {
-			out[i] = `"` + a + `"`
-		} else {
-			out[i] = a
-		}
-	}
-	return out
 }

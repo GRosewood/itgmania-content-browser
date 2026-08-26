@@ -47,27 +47,6 @@ local function Refresh()
 	state.dlRows = rows
 
 	-- A helper-run install reports from its own side, so it has to be asked.
-	-- Refreshes come thick and fast while a download runs; three times a second
-	-- is as often as a progress bar can say anything new.
-	-- guarded because Refresh is defined long before these methods are
-	-- attached, and it can run during load
-	if DL.Watching and DL.Watching() then
-		local now = GetTimeSinceStart()
-		if now >= (DL.pollAt or 0) then
-			DL.pollAt = now + 0.35
-			DL.Poll()
-		end
-	end
-
-	-- and an update reports from the same place, for the same reason
-	if UP.Busy and UP.Busy() then
-		local now = GetTimeSinceStart()
-		if now >= (UP.pollAt or 0) then
-			UP.pollAt = now + UP.POLL_EVERY
-			UP.Poll()
-		end
-	end
-
 	MESSAGEMAN:Broadcast("SMORefresh")
 end
 
@@ -194,7 +173,7 @@ end
 -- answers no for hosts the fetch below it would reach without trouble.
 local function CanReach(url)
 	if NETWORK:IsUrlAllowed(url) then return true end
-	return CB.Upstream ~= nil and CB.Upstream(url) ~= url
+	return false
 end
 
 local function UrlAllowed()

@@ -42,28 +42,6 @@ func TestInstallKeyIsStableAcrossSpellings(t *testing.T) {
 	}
 }
 
-// helperArgs must always carry -install-dir. Without it the helper falls back
-// to discovery, and on a machine with two installs it can publish helper.json
-// where the running game will never look for it.
-func TestHelperArgsPinTheInstall(t *testing.T) {
-	args := helperArgs(testInstall("/opt/itgmania"))
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-helper") {
-		t.Errorf("helperArgs lost -helper: %q", joined)
-	}
-	if !strings.Contains(joined, "-install-dir") {
-		t.Fatalf("helperArgs must pin -install-dir: %q", joined)
-	}
-	for i, a := range args {
-		if a == "-install-dir" {
-			if i+1 >= len(args) || args[i+1] != "/opt/itgmania" {
-				t.Fatalf("-install-dir is not followed by the root: %q", joined)
-			}
-			return
-		}
-	}
-}
-
 func TestAutostartStatusDescribesWhenItStarts(t *testing.T) {
 	cases := []struct {
 		starts StartsWhen

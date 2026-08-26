@@ -12,80 +12,6 @@ import (
 // The unit file is what makes a cabinet work, so its contents are pinned here
 // rather than left to be discovered on somebody's machine.
 
-func TestSystemdUnitStartsWithTheSession(t *testing.T) {
-	body := systemdUnitBody(testInstall("/opt/itgmania"))
-	for _, want := range []string{
-		"WantedBy=default.target", // this is what the wants symlink points at
-		"Type=simple",
-		"-install-dir",
-		"content-browser-helper",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("unit is missing %q:\n%s", want, body)
-		}
-	}
-}
-
-// Restart=always would fight uninstall: the helper exits 0 on purpose when its
-// config is removed, which is exactly how uninstall and upgrade stop it.
-func TestSystemdUnitDoesNotFightUninstall(t *testing.T) {
-	body := systemdUnitBody(testInstall("/opt/itgmania"))
-	if strings.Contains(body, "Restart=always") {
-		t.Error("Restart=always would restart a helper that was deliberately stopped")
-	}
-	if !strings.Contains(body, "Restart=on-failure") {
-		t.Error("a helper that crashes should come back")
-	}
-}
-
-func TestSystemdQuoteHandlesSpacesAndQuotes(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"/opt/itgmania", "/opt/itgmania"},
-		{"/opt/my games/itg", `"/opt/my games/itg"`},
-		{`/opt/we"rd`, `"/opt/we\"rd"`},
-		{`/opt/back\slash`, `"/opt/back\\slash"`},
-	}
-	for _, c := range cases {
-		if got := systemdQuote(c.in); got != c.want {
-			t.Errorf("systemdQuote(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// A path with a space must survive into ExecStart as one argument, or systemd
-// splits it and the helper is started with nonsense.
-func TestSystemdUnitQuotesSpacedPaths(t *testing.T) {
-	body := systemdUnitBody(testInstall("/opt/my games/itgmania"))
-	var exec string
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "ExecStart=") {
-			exec = line
-		}
-	}
-	if exec == "" {
-		t.Fatal("no ExecStart line")
-	}
-	if !strings.Contains(exec, `"`) {
-		t.Errorf("spaced path was not quoted: %s", exec)
-	}
-}
-
-func TestDesktopQuoteFollowsTheSpec(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"/opt/itg", "/opt/itg"},
-		{"/opt/my games/itg", `"/opt/my games/itg"`},
-		// A percent is doubled everywhere, quoted or not -- and doubling it is
-		// all it needs, so this stays unquoted.
-		{"/opt/100%/itg", "/opt/100%%/itg"},
-		{"/opt/$HOME/itg", `"/opt/\$HOME/itg"`},
-	}
-	for _, c := range cases {
-		if got := desktopQuote(c.in); got != c.want {
-			t.Errorf("desktopQuote(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 // Two installs must not share a unit, or uninstalling one stops the other.
 func TestUnitNamesArePerInstall(t *testing.T) {
 	a := systemdUnitName(testInstall("/opt/itgmania"))
@@ -193,20 +119,5 @@ func TestAutostartHomeFallsBackForPortableInstalls(t *testing.T) {
 	inst := Install{Root: "/opt/itgmania", SaveDir: "/opt/itgmania/Save"}
 	if got := autostartHome(inst); got == "" {
 		t.Fatal("autostartHome returned nothing for a portable install")
-	}
-}
-
-// The macOS agent must not restart a helper that exited cleanly, for the same
-// reason the systemd unit must not.
-func TestLaunchAgentOnlyRestartsOnFailure(t *testing.T) {
-	body := launchAgentBody(testInstall("/Applications/ITGmania"))
-	if !strings.Contains(body, "SuccessfulExit") {
-		t.Error("KeepAlive should be conditional on how the helper exited")
-	}
-	if strings.Contains(body, "<key>KeepAlive</key>\n\t<true/>") {
-		t.Error("an unconditional KeepAlive would fight uninstall")
-	}
-	if !strings.Contains(body, "-install-dir") {
-		t.Error("the agent must pin the install")
 	}
 }
