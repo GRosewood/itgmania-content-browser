@@ -57,38 +57,42 @@ is and is not in place, and exits non-zero when something needs attention.
 
 ### How it works without a helper
 
-Everything the browser does runs inside the game or against ordinary web
-hosts. There is **no background service**: nothing to register, nothing
-running while the game is closed, nothing to babysit on a cabinet.
+There is **no background service**: nothing to register, nothing running
+while the game is closed, nothing to babysit on a cabinet. The game does its
+own fetching, and one web service fills the engine's real gaps.
 
-ITGmania does not let a theme reach the network beyond an allowlist, and its
-Lua file manager exposes only `Copy`, `DoesFileExist`, `GetFileSizeBytes`,
-`GetHashForFile`, `GetDirListing` and `Unzip` — no delete, move or rename
-exists anywhere in the Lua API, and `RageFile:Write` cannot write binary
-data. Within those walls:
+**Most traffic is the game talking straight to the source.** The catalogue,
+search, pack pages and banners come from stepmaniaonline.net; popularity
+from arrowcloud.dance; the doubles category from itgdb.net; update manifests
+and module archives from GitHub. Pack installs stream the zip to disk with
+the engine's own `downloadFile` and land it in `/Songs` with
+`FILEMAN:Unzip`. Pack deletion truncates every file to zero bytes -- the one
+kind of remove the engine allows -- reclaiming the disk immediately; the
+emptied group leaves the music wheel on the next song reload, which the
+browser offers on the way out. In-game updates verify the archive's SHA-256
+with the engine's own hasher and unzip it over the module's folder. All of
+this works even if the relay below is unreachable, and every one of those
+hosts must therefore be on the allowlist -- the installer puts them there.
 
-* **Browsing and search** read stepmaniaonline.net, arrowcloud.dance and
-  itgdb.net directly — the installer allowlists them.
-* **Pack installs** stream the zip to disk with the engine's own
-  `downloadFile` and land it in `/Songs` with `FILEMAN:Unzip`.
-* **Pack deletion** truncates every file in the pack to zero bytes — the one
-  kind of remove the engine allows — which reclaims the disk immediately;
-  the emptied group leaves the music wheel on the next song reload, which
-  the browser offers on the way out. The empty folder skeleton remains.
-* **Song previews, chart windows, single-song installs, `Pack.ini` and
-  credits** come from the **preview relay** — a small web app (see
-  `itg-content-webapp`) that reads the catalogue's pack zips with ranged
-  requests and serves the game the things its engine cannot make for
-  itself: playable audio inflated out of a compressed archive, parsed
-  chart windows, and a single song re-served as a small real zip. The
-  deployed relay at `https://itgcontent.net` is the default; a machine
-  running its own (a developer with the dev server up) points at it by
-  writing that URL as the one line of
-  `Save/ITGmaniaContentBrowser/webapp.txt`. Browsing, downloading and
-  deletion all work without it.
-* **In-game updates** fetch the release manifest from this repository, verify
-  the archive's SHA-256 with the engine's own hasher, and unzip it over the
-  module's folder.
+**Four things go through the preview relay at `https://itgcontent.net`**,
+because the engine cannot make them for itself: ITGmania's Lua cannot write
+binary data (`RageFile:Write` stops at the first zero byte), cannot inflate
+anything except a complete zip archive, and has no delete, move or rename.
+So the relay (the `itg-content-webapp` repo) reads the catalogue's pack zips
+with ranged requests -- never a whole pack -- and serves:
+
+* **song previews**: the one song's audio, inflated out of the pack's
+  archive, whole, so the sample seek always lands;
+* **chart windows**: the sample window and every difficulty's notes, parsed
+  from the simfile;
+* **single-song installs**: the song's folder re-served as a small real zip
+  the engine will unzip;
+* **pack facts**: `Pack.ini` sync, which songs carry Lua mods, and charter
+  credits.
+
+A machine running its own relay -- a developer with the dev server up --
+points at it by writing that URL as the one line of
+`Save/ITGmaniaContentBrowser/webapp.txt`.
 
 Installs that ran an older version's background helper are cleaned on the
 next install run: its login item, launcher line and binary are removed.
