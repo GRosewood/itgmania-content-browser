@@ -1,10 +1,10 @@
 {
-  "version": "0.4",
-  "notes": "The background helper is gone: previews, chart windows and single-song installs come from itgcontent.net, and downloads, deletion and updates run in the game itself. Run the installer once to get the new allowlist and sweep the old helper.",
+  "version": "0.5",
+  "notes": "Fixes title-menu navigation (the first press no longer snaps back to the top item) and search paging (charter verification no longer throws you back to page one). Previews, chart windows and single-song installs come from itgcontent.net; downloads, deletion and updates run in the game itself.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.4/itgmania-content-browser-module-0.4.zip",
-    "sha256": "4bc5817bbe6069e81668316b6250bcca9131007fcd2098ca222a12dbd00476a4",
-    "bytes": 240626
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.5/itgmania-content-browser-module-0.5.zip",
+    "sha256": "850d6e507cb2e73eb2a08a13265368551543a0e82fc0b9bdde9f6b893cb25e95",
+    "bytes": 241610
   },
   "minHelper": "0.4"
 }
