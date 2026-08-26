@@ -13,6 +13,7 @@ local DL               = CB.DL
 local LO               = CB.LO
 local PlaySfx          = CB.PlaySfx
 local Toast            = CB.Toast
+local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
 local refs             = CB.refs
 local NormalizeName    = CB.NormalizeName
@@ -172,7 +173,7 @@ function DL.StartSong(pack, song)
 	local id = pack and tonumber(pack.id)
 	if not (id and title and title ~= "") then return false, "no song selected" end
 
-	local root = WebBase() .. "/api/songzip/" .. id .. "/" .. NETWORK:UrlEncode(title)
+	local root = WebBase() .. "/api/songzip/" .. id .. "/" .. UrlEncode(title)
 	if not NETWORK:IsUrlAllowed(root) then
 		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
 		return false, host .. " is missing from HttpAllowHosts"

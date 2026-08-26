@@ -2,6 +2,8 @@
 
 *by GregTech*
 
+**[itgcontent.net](https://itgcontent.net)**
+
 A Simply Love module that adds a **Find Content** entry to the ITGmania title
 menu: an in-game browser for [stepmaniaonline.net](https://stepmaniaonline.net)
 that downloads and installs song packs without leaving the game.
@@ -195,7 +197,8 @@ machine cross-compiles every binary.
 
 ```bash
 go test ./...
-./build.sh 1.0.0          # all six binaries -> dist/
+./build.sh                # version comes from branding.go -> dist/
+./build.sh dev-$(git rev-parse --short HEAD)   # throwaway; skips the version checks
 ```
 
 `build.sh` also produces the graphical installers when their toolchain is
@@ -221,41 +224,59 @@ If you fork and publish this, change the module path in `go.mod` from
 
 ## Releasing
 
-Cutting a release is changing the version in **three places that must agree**
--- `Version` in
-[internal/branding/branding.go](internal/branding/branding.go),
-`UP.VERSION` in the payload's `04 queues.lua`, and the `VERSION` stamp file
-inside the payload's parts folder -- plus tagging `v<version>`. The stamp is
-what says which module is actually installed; without it every
-module-only update re-offers itself forever. `build.sh`
-refuses to build a release while any of the four disagree, and `mkmodulezip`
-refuses to cut an archive whose stamp does not match, so a drift fails the
-build instead of shipping.
+A release is one version number in **three files that have to agree** --
+`Version` in [internal/branding/branding.go](internal/branding/branding.go),
+`UP.VERSION` in the payload's `04 queues.lua`, and the payload's `VERSION`
+stamp file -- plus the `v<version>` tag built from them. The stamp is what says
+which module is actually installed; without it every module-only update
+re-offers itself forever. `build.sh` compares all four and refuses to build a
+release while any of them disagree, and `mkmodulezip` refuses to cut an archive
+whose stamp does not match, so drift fails the build instead of shipping.
 
 ### Publish in this order
 
-1. Bump the three versions, run `./build.sh`. It writes the release archive to
-   `dist/` **and stages a copy at `release/module.zip`** — that copy is the one
-   the release will publish.
-2. Set `minHelper` in `dist/update.json` to the **oldest browser version that
-   can update itself to this module in-game** — not automatically this release.
-   It defaults to the version being cut, which refuses the in-game update for
-   everyone older and points them at the installer instead. (The name is a
-   fossil from when a helper applied updates; the field now gates the module's
-   own updater.) Fill in `notes` while you are there.
+1. Run `go test ./...`, bump the three versions, then run `./build.sh` with no
+   argument -- it takes the version from `branding.go`. It writes the release
+   archive to `dist/` **and stages a copy at `release/module.zip`**. That copy
+   is the one the release publishes.
+
+2. Fill in `notes` and `minHelper` in `dist/update.json`.
+
+   `notes` is read by players, inside the game, deciding whether to take the
+   update. Write it for them, not for the changelog.
+
+   `minHelper` is the **oldest version whose own updater can actually take
+   this one** -- not automatically the version being cut, and not simply the
+   oldest still in the wild. A version whose updater cannot verify a download
+   can never accept one: 0.4 and older compare the engine's raw 32-byte digest
+   against the manifest's hex and never match, so 0.6 sets `0.5` and everything
+   older is sent to the installer instead of failing forever. When in doubt,
+   read the updater in the oldest version you mean to include rather than
+   guessing. It defaults to the version being cut, which excludes everybody.
+   (The name is a fossil from when a helper applied updates; the field now
+   gates the module's own updater.)
+
 3. Copy `dist/update.json` to the repo root and commit it **together with**
    `release/module.zip`. They describe each other: the manifest carries that
-   archive's sha256.
+   archive's sha256, and committing one without the other is the whole failure
+   this ordering exists to prevent.
+
 4. Tag `v<version>` and push.
 
-The workflow publishes the committed `release/module.zip` rather than the copy
-the runner builds, and refuses to publish at all if the manifest disagrees with
-it. That refusal matters: the archive is deterministic only for a **fixed Go
-toolchain** — `compress/flate` makes no promise across Go releases, so a zip
-built locally and one built by CI can hold byte-identical files and still differ
-by kilobytes. Publishing the runner's copy against a manifest describing the
-local one is what failed the in-game update three releases running: the release
-looked fine, and every player who took it was told the download was corrupt.
+`dist/` is gitignored and nothing in it is published directly -- CI rebuilds the
+installers from the tag. Only the two files committed in step 3 cross over, and
+the module archive is published from that committed copy rather than from the
+one the runner builds.
+
+That last part is not fussiness. The archive is deterministic only for a
+**fixed Go toolchain**: `compress/flate` makes no promise across Go releases, so
+a zip built locally and one built by CI can hold byte-identical files and still
+differ by kilobytes. Publishing the runner's copy against a manifest describing
+the local one is what failed the in-game update three releases running -- the
+release looked fine, and every player who took it was told the download was
+corrupt. The workflow now compares the committed archive against the manifest
+and stops the release on any disagreement, so a mismatch costs a tag instead of
+everybody's update.
 
 ## Layout
 

@@ -15,6 +15,7 @@ local Clamp            = CB.Clamp
 local PlaySfx          = CB.PlaySfx
 local Refresh          = CB.Refresh
 local Toast            = CB.Toast
+local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
 local state            = CB.state
 
@@ -332,6 +333,16 @@ function Snd.IsLift(note, lane)
 	return math.floor(mask / (2 ^ (lane - 1))) % 2 == 1
 end
 
+-- Is that column's note a mine? Same shape as Snd.IsLift: a subset of the
+-- columns Snd.InLane already answers for, carried in its own mask. The mask
+-- is absent on every row that has no mine in it, which is nearly all of
+-- them, so a missing mask means none rather than an error.
+function Snd.IsMine(note, lane)
+	local mask = note.m
+	if not mask or mask == 0 then return false end
+	return math.floor(mask / (2 ^ (lane - 1))) % 2 == 1
+end
+
 -- Where a column sits, for a field of however many columns there are. The
 -- arrows are the width of the column, edge to edge, the way a note field is
 -- -- doubles is the same four directions twice over, which is what the pad is.
@@ -535,7 +546,7 @@ function Snd.Play(pack, song)
 		PlaySfx("invalid")
 		return
 	end
-	local root = WebBase() .. "/api/audio/" .. id .. "/" .. NETWORK:UrlEncode(title)
+	local root = WebBase() .. "/api/audio/" .. id .. "/" .. UrlEncode(title)
 	if not NETWORK:IsUrlAllowed(root) then
 		PlaySfx("invalid")
 		local host = WebBase():match("^https?://([^/:]+)") or WebBase()

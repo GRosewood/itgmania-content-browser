@@ -21,6 +21,7 @@ local FetchServerRows = CB.FetchServerRows
 local NormalizeName   = CB.NormalizeName
 local PackTypeOf      = CB.PackTypeOf
 local UrlAllowed      = CB.UrlAllowed
+local Refresh         = CB.Refresh
 local SearchIndexLanded = CB.SearchIndexLanded
 local state           = CB.state
 
@@ -111,6 +112,18 @@ local function RecentCutoff()
 end
 
 
+-- The walk has stopped, for whatever reason. Everything parked on the index
+-- has to hear about it, and the screen with them: a view whose row count did
+-- not change has a header still reading "indexing ...", and nothing else is
+-- coming along to correct it.
+local function IndexSettled()
+	FeaturedResolve()
+	if RefreshYearView then RefreshYearView() end
+	if RefreshLevelView then RefreshLevelView() end
+	SearchIndexLanded()
+	Refresh()
+end
+
 local function RecentIndexStep()
 	local idx = state.recentIndex
 	if idx.status ~= "loading" then return end
@@ -121,7 +134,7 @@ local function RecentIndexStep()
 	local walk = idx.gen or 0
 	if idx.page >= RECENT_MAX_PAGES then
 		idx.status = "ready"
-		FeaturedResolve()
+		IndexSettled()
 		return
 	end
 
@@ -131,15 +144,10 @@ local function RecentIndexStep()
 		if err or not rows or #rows == 0 then
 			-- a partial index still answers most questions; only a completely
 			-- empty one counts as a failure
+			-- a partial index settles the same way a complete one does: the
+			-- views parked on it are waiting for it to stop, not to succeed
 			idx.status = (idx.page > 0) and "ready" or "failed"
-			FeaturedResolve()
-			-- the same pumps the finished walk fires below: the views parked
-			-- on this index wait for it to settle, and it settles this way
-			-- too -- without the word reaching them, a level or year list
-			-- whose last pending answer was this one would wait forever
-			if RefreshYearView then RefreshYearView() end
-			if RefreshLevelView then RefreshLevelView() end
-			SearchIndexLanded()
+			IndexSettled()
 			return
 		end
 
@@ -185,10 +193,7 @@ local function RecentIndexStep()
 		if #rows < RECENT_PAGE or (oldest and idx.stopAt and oldest < idx.stopAt) then
 			idx.status = "ready"
 			idx.frac = 1
-			FeaturedResolve()
-			if RefreshYearView then RefreshYearView() end
-			if RefreshLevelView then RefreshLevelView() end
-			SearchIndexLanded()
+			IndexSettled()
 		else
 			RecentIndexStep()
 			if RefreshYearView then RefreshYearView() end

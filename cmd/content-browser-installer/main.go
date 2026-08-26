@@ -481,12 +481,53 @@ func runCheck(target string) int {
 	// but song previews and single-song installs come through it.
 	relay := installer.RelayBase(inst)
 	if installer.RelayReachable(relay) {
-		fmt.Printf("  Preview relay:  answering at %s\n", relay)
+		// Reachable from here is not the question the player is asking. The
+		// engine validates HTTPS against its own Data/ca-bundle.crt and never
+		// looks at the system trust store, so a bundle older than the relay's
+		// certificate chain fails inside the game while every tool on the
+		// machine reports a healthy network. Saying only "answering" here is
+		// how that ends up looking like a bug in the browser.
+		trusted, haveBundle := installer.RelayTrustedByGame(inst, relay)
+		switch {
+		case !haveBundle:
+			fmt.Printf("  Preview relay:  answering at %s\n", relay)
+			fmt.Println("    (could not read this install's Data/ca-bundle.crt, so whether")
+			fmt.Println("     the game itself will trust that certificate is unverified)")
+		case trusted:
+			fmt.Printf("  Preview relay:  answering at %s\n", relay)
+		default:
+			problems++
+			fmt.Printf("  Preview relay:  answering at %s, but THIS INSTALL WILL NOT TRUST IT\n", relay)
+			fmt.Println("    ITGmania validates HTTPS against its own Data/ca-bundle.crt")
+			fmt.Println("    rather than the system trust store, and this one cannot verify")
+			fmt.Println("    that certificate. In the game the preview endpoint looks")
+			fmt.Println("    unreachable while downloads keep working, because the download")
+			fmt.Println("    host uses a different certificate authority.")
+		}
 	} else {
 		fmt.Printf("  Preview relay:  NOT reachable at %s\n", relay)
 		fmt.Println("    Browsing, downloads and deletion work without it; song")
 		fmt.Println("    previews and single-song installs do not. Start it, or put")
 		fmt.Println("    its URL in Save/ITGmaniaContentBrowser/webapp.txt.")
+	}
+
+	// The bundle gates far more than previews, and the other casualties are
+	// quieter: pack search just finds nothing, and the in-game update check
+	// fetches its manifest from raw.githubusercontent.com, which is on the same
+	// new Let's Encrypt roots. A cabinet in this state looks like three
+	// unrelated bugs.
+	if bad, checked := installer.UntrustedByGame(inst, installer.TrustHosts); checked && len(bad) > 0 {
+		problems++
+		fmt.Println()
+		fmt.Println("  Certificates:   this install cannot verify hosts the browser needs")
+		for _, b := range bad {
+			fmt.Printf("    %s\n", b)
+		}
+		fmt.Printf("    Its %s is older than the\n",
+			filepath.Join(inst.Root, "Data", "ca-bundle.crt"))
+		fmt.Println("    certificate authorities those hosts now use. Replace it with the")
+		fmt.Println("    copy from a current ITGmania release, or append the missing roots")
+		fmt.Println("    to it -- the game reads that file and nothing else.")
 	}
 
 	fmt.Println()

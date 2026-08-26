@@ -1,10 +1,10 @@
 {
-  "version": "0.6",
-  "notes": "Coming back from an update no longer lands you on an empty tab. On Linux, the installer now finds the theme your cabinet actually loads when it lives on a drive mounted through the game’s own options, instead of installing into a copy nothing is running — and it names the directory it wrote to, so a wrong one is visible rather than silent.",
+  "version": "0.7",
+  "notes": "Song previews and single-song downloads work again on installs where the engine’s own URL encoder let them down — the module now encodes song titles itself. Mines appear in the chart preview instead of leaving a gap where a chart is telling you not to step. The Years tab stops saying it is indexing once it has finished, rather than waiting for you to open a year. The installer also finds the theme your cabinet actually loads when it lives on a mounted drive, and names the directory it wrote to.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.6/itgmania-content-browser-module-0.6.zip",
-    "sha256": "f88c237389455b9f6979871b75f31d7a1cadd5f0a20887b73543ed0f0fa211da",
-    "bytes": 241867
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.7/itgmania-content-browser-module-0.7.zip",
+    "sha256": "d77b7cd20d52b01181c853ca363f635d8ac1c94f26b82c5876b5ad66cf855088",
+    "bytes": 242483
   },
   "minHelper": "0.5"
 }

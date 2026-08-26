@@ -364,6 +364,14 @@ function CB.Screen.ChartWindow(ui, detail)
 	Snd.skinLifts = skinLift
 	Snd.liftsAF = {}
 
+	-- A mine is its own element too ("Tap Mine"), and it is the one note in a
+	-- chart that means "do not step here" -- so drawing it as anything else is
+	-- worse than not drawing it. A skin without one gets nothing, which is what
+	-- the window did for every skin until now.
+	local skinMine = skinNote and LO.NoteActor("Left", "Tap Mine") ~= nil
+	Snd.skinMines = skinMine
+	Snd.minesAF = {}
+
 	for lane = 1, 8 do
 		local column = COLUMN[((lane - 1) % 4) + 1]
 		Snd.notesAF[lane] = {}
@@ -402,6 +410,25 @@ function CB.Screen.ChartWindow(ui, detail)
 					chartWin[#chartWin+1] = lift .. {
 						InitCommand = function(self)
 							Snd.liftsAF[lane][slot] = self
+							self:zoom(Snd.MINI):visible(false)
+						end,
+					}
+				end
+			end
+		end
+	end
+
+	-- and the same again for mines, sharing the same slot as the tap
+	if skinMine then
+		for lane = 1, 8 do
+			local column = COLUMN[((lane - 1) % 4) + 1]
+			Snd.minesAF[lane] = {}
+			for slot = 1, Snd.LANE_POOL do
+				local mine = LO.NoteActor(column, "Tap Mine")
+				if mine then
+					chartWin[#chartWin+1] = mine .. {
+						InitCommand = function(self)
+							Snd.minesAF[lane][slot] = self
 							self:zoom(Snd.MINI):visible(false)
 						end,
 					}
@@ -554,10 +581,12 @@ function CB.Screen.ChartWindow(ui, detail)
 				for lane = 1, 8 do
 					local pool, edges = Snd.notesAF[lane], Snd.edgeAF[lane]
 					local lifts = Snd.liftsAF[lane]
+					local mines = Snd.minesAF[lane]
 					for slot = 1, Snd.LANE_POOL do
 						if pool and pool[slot] then pool[slot]:visible(false) end
 						if edges and edges[slot] then edges[slot]:visible(false) end
 						if lifts and lifts[slot] then lifts[slot]:visible(false) end
+						if mines and mines[slot] then mines[slot]:visible(false) end
 					end
 
 					local rec = Snd.receptors[lane]
@@ -697,14 +726,32 @@ function CB.Screen.ChartWindow(ui, detail)
 						local arrow = Snd.notesAF[lane] and Snd.notesAF[lane][slot]
 						local edge = Snd.edgeAF[lane] and Snd.edgeAF[lane][slot]
 						local lift = Snd.liftsAF[lane] and Snd.liftsAF[lane][slot]
+						local mine = Snd.minesAF[lane] and Snd.minesAF[lane][slot]
 						local isLift = Snd.IsLift(note, lane)
+						local isMine = Snd.IsMine(note, lane)
 						local x = Snd.LaneX(lane, CW_MID)
-						-- The two share a slot, so whichever is not drawing
+						-- The three share a slot, so whichever is not drawing
 						-- has to be put away right here. Leaving it to the
 						-- sweep below would be too late: that one clears from
 						-- the last used slot on, and this slot is in use.
 						if lift then lift:visible(false) end
-						if isLift and lift then
+						if mine then mine:visible(false) end
+						if isMine then
+							-- A mine the skin has no art for is drawn as
+							-- nothing. Falling through to the tap below would
+							-- put an arrow where the chart says do not step --
+							-- the one place a wrong graphic actively misleads,
+							-- rather than merely looking plain.
+							if mine then
+								used[lane] = slot
+								if arrow then arrow:visible(false) end
+								mine:visible(true)
+								mine:xy(x, y)
+								-- No quantization slide, for the same reason a
+								-- lift gets none: a mine is one fixed graphic,
+								-- and it has no beat colour to go looking for.
+							end
+						elseif isLift and lift then
 							used[lane] = slot
 							if arrow then arrow:visible(false) end
 							lift:visible(true)
@@ -755,10 +802,12 @@ function CB.Screen.ChartWindow(ui, detail)
 			for lane = 1, 8 do
 				local pool, edges = Snd.notesAF[lane], Snd.edgeAF[lane]
 				local lifts = Snd.liftsAF[lane]
+				local mines = Snd.minesAF[lane]
 				for slot = used[lane] + 1, Snd.LANE_POOL do
 					if pool and pool[slot] then pool[slot]:visible(false) end
 					if edges and edges[slot] then edges[slot]:visible(false) end
 					if lifts and lifts[slot] then lifts[slot]:visible(false) end
+					if mines and mines[slot] then mines[slot]:visible(false) end
 				end
 			end
 
