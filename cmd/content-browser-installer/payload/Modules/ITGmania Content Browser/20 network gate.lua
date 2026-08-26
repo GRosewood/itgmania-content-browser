@@ -215,8 +215,19 @@ function UP.Start()
 			-- deletes the downloaded file when the callback returns, and
 			-- UP.Reload may only run from an HTTP response besides.
 			local zip = "/Downloads/" .. zipname
+			-- The engine hands back the digest as thirty-two raw bytes, not
+			-- hex -- lua_pushlstring of the bare buffer -- so it is spelled
+			-- out here before it can be compared with what the manifest says.
 			local sum = CRYPTMAN:SHA256File(zip)
-			if type(sum) ~= "string" or sum:lower() ~= tostring(mod.sha256):lower() then
+			local hex
+			if type(sum) == "string" and #sum == 32 then
+				local parts = {}
+				for i = 1, #sum do
+					parts[i] = string.format("%02x", sum:byte(i))
+				end
+				hex = table.concat(parts)
+			end
+			if not hex or hex ~= tostring(mod.sha256):lower() then
 				UP.job = { phase = "error", done = true, pct = -1,
 					error = "the download did not match its checksum" }
 				Refresh()

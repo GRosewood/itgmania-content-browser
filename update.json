@@ -3,8 +3,8 @@
   "notes": "The background helper is gone: previews, chart windows and single-song installs come from itgcontent.net, and downloads, deletion and updates run in the game itself. Run the installer once to get the new allowlist and sweep the old helper.",
   "module": {
     "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.4/itgmania-content-browser-module-0.4.zip",
-    "sha256": "09e1cb363b27e0b1e286c719feb1a5a0310c5af820ded96d96713ed6da751334",
-    "bytes": 240444
+    "sha256": "4bc5817bbe6069e81668316b6250bcca9131007fcd2098ca222a12dbd00476a4",
+    "bytes": 240626
   },
   "minHelper": "0.4"
 }
