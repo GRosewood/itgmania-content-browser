@@ -10,6 +10,7 @@ local CB = ...
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
 local FetchPacks      = CB.FetchPacks
+local ROWS            = CB.ROWS
 local FetchServerRows = CB.FetchServerRows
 local PassesFilter    = CB.PassesFilter
 local Refresh         = CB.Refresh
@@ -115,7 +116,20 @@ local function SearchPublish(acc)
 	state.searchCapped = (#acc.list > #rows)
 	state.localRows = rows
 	state.loading = (acc.inFlight > 0)
-	FetchPacks(1, false)
+
+	-- Only the FIRST publish of a query puts the reader on page one.
+	--
+	-- Verification keeps landing for as long as a search is being read, and
+	-- every answer republishes the list. Re-paging to the top here threw the
+	-- reader back to the first row each time a pack's credits arrived --
+	-- however far into the results they had walked. The ordering does shift
+	-- underneath them as scores firm up, which is the honest cost of showing
+	-- results before they are fully verified; being moved is still better
+	-- than being sent home.
+	local first = not acc.published
+	acc.published = true
+	local pages = math.max(1, math.ceil(#rows / ROWS))
+	FetchPacks(first and 1 or math.min(state.page, pages), not first)
 end
 
 -- What the simfiles say, applied over what the catalogue guessed.

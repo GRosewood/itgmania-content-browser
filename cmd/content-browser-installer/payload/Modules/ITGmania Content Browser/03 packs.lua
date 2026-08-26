@@ -36,6 +36,17 @@ function FEAT.RowCol()
 	return math.floor((slot - 1) / FEAT.COLS), (slot - 1) % FEAT.COLS
 end
 
+-- Is the featured grid somewhere a cursor can actually sit?
+--
+-- Being mid-load is not enough. A grid with no cards drawn has nothing to
+-- highlight, so landing a cursor there means the reader's next press moves
+-- OUT of it rather than through it -- felt as a key that flashed and
+-- scrolled nothing. Three places choose between the grid and its
+-- neighbours, and all three ask this.
+function FEAT.Landable()
+	return #state.featured.cards > 0
+end
+
 -- move to an absolute (page, row, column); false when nothing is there, which
 -- is what makes the edges of the grid feel solid
 function FEAT.Goto(page, row, col)

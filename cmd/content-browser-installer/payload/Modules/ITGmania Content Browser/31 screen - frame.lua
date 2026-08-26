@@ -12,6 +12,7 @@ local CB = ...
 local ActiveTabIndex       = CB.ActiveTabIndex
 local BrowserInput         = CB.BrowserInput
 local BuildFeatured        = CB.BuildFeatured
+local FEAT                 = CB.FEAT
 local FetchPackTypes       = CB.FetchPackTypes
 local FetchPacks           = CB.FetchPacks
 local LO                   = CB.LO
@@ -68,7 +69,7 @@ function CB.Screen.Frame()
 					BuildFeatured()
 				end
 				-- the featured grid is where the eye should land first
-				if #state.featured.cards > 0 or state.featured.status == "loading" then
+				if FEAT.Landable() then
 					state.zone = "featured"
 				elseif #state.packs == 0 then
 					-- ...and the tab row when there is no grid to land on

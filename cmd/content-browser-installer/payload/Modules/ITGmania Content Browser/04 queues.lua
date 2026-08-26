@@ -78,7 +78,7 @@ end
 -- no such limit and is already running.
 local UP = {}
 
-UP.VERSION = "0.4"     -- what this module is; the installer reports the same
+UP.VERSION = "0.5"     -- what this module is; the installer reports the same
 UP.state   = nil       -- the last manifest answer about versions
 UP.asked   = false     -- ...and whether it has been asked yet this session
 UP.job     = nil       -- an update in flight

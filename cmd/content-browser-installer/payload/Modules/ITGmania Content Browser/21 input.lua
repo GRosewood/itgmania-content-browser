@@ -301,7 +301,7 @@ local BrowserInput = function(event)
 				elseif state.mode == "year" then
 					state.zone = "years"
 				elseif state.mode == "list" and state.search == ""
-				       and (#feat.cards > 0 or feat.status == "loading") then
+				       and FEAT.Landable() then
 					state.zone = "featured"
 				else
 					state.zone = "list"
@@ -631,7 +631,7 @@ local BrowserInput = function(event)
 				if state.mode == "year" then
 					state.zone = "years"
 				elseif state.mode == "list" and state.search == ""
-				       and (#feat.cards > 0 or feat.status == "loading") then
+				       and FEAT.Landable() then
 					state.zone = "featured"
 				else
 					state.tabIndex = ActiveTabIndex()

@@ -107,15 +107,32 @@ end
 
 local titleChoiceNames = {"1", "2", "3", "4"}
 
+-- The last selection actually read, so a failed read can hold its ground.
+local titleKnownIndex = 0
+
+-- Where the engine's own selection sits.
+--
+-- PLAYER_1 deliberately, and NOT GAMESTATE:GetMasterPlayerNumber(): this
+-- screen sets SharedSelection, so ChangeSelection writes every player's choice
+-- and PLAYER_1 always carries it -- while the master player number is nil here,
+-- because nobody has joined yet. Reading the master would fail on exactly this
+-- screen, where the theme's own screens read it happily.
 local function TitleGetEngineIndex()
 	local screen = SCREENMAN:GetTopScreen()
-	if not screen or not screen.GetSelectionIndex then return 0 end
+	if not screen or not screen.GetSelectionIndex then return titleKnownIndex end
 	-- pcall on the method directly: wrapping it in a fresh closure allocated
 	-- garbage on every call, and the title watcher makes this call dozens of
 	-- times a second for as long as the title screen is up.
 	local ok, index = pcall(screen.GetSelectionIndex, screen, PLAYER_1)
-	if ok and type(index) == "number" then return index end
-	return 0
+	if ok and type(index) == "number" then
+		titleKnownIndex = index
+		return index
+	end
+	-- Holding the last known index rather than answering 0. Zero is a real
+	-- selection -- the first row -- so answering it on failure made "could not
+	-- read" indistinguishable from "the reader is on the top row", and the
+	-- highlight would jump home rather than simply stay put.
+	return titleKnownIndex
 end
 
 -- The selection the rows should paint from.
@@ -249,14 +266,21 @@ local TitleOverlayInput = function(event)
 			titleLeaving = true
 			if refs.titleItem then refs.titleItem:playcommand("SMOTitleLeave") end
 		elseif isMenuNav then
-			-- A move between two native choices. Nothing here broadcast at
-			-- all, so the highlight used to trail the selection until the next
-			-- watcher tick. The engine wraps (WrapCursor is true for this
-			-- screen), and our row is not in its cycle, so the landing index is
-			-- simply one step round.
-			local step = isForward and 1 or -1
-			TitlePredict((engineIndex + step + titleNumChoices) % titleNumChoices)
-			MESSAGEMAN:Broadcast("SMOTitleRefresh")
+			-- A move between two native choices: nothing to do but let it
+			-- through, and repaint from where the engine actually lands.
+			--
+			-- This used to guess the landing index and paint it immediately,
+			-- one step round the wrap. The guess is only right when the engine
+			-- moves at all, and it does not always: ScreenSelectMaster only
+			-- moves when its own direction map has somewhere to go for that
+			-- button, which depends on the theme's layout and the game type.
+			-- Where it refused, the row lit up for one watcher tick and then
+			-- snapped back -- a press that flashed and scrolled nothing.
+			--
+			-- The watcher polls every 0.03s and repaints from the real index,
+			-- so the cost of not guessing is about two frames of the highlight
+			-- trailing the selection, and the benefit is that it is never
+			-- somewhere the selection is not.
 		end
 		return false
 	end
