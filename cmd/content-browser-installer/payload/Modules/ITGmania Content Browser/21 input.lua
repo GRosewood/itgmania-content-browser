@@ -217,6 +217,11 @@ local BrowserInput = function(event)
 				state.zone = "tabs"
 				PlaySfx("change")
 				Refresh()
+			elseif button == "Start" and firstPress and not LO.UpdateActionable() then
+				-- Newer, but not by this road. Saying so beats starting a job
+				-- that reports its own failure a second later.
+				PlaySfx("invalid")
+				Toast(UP.Latest() .. " needs a newer helper -- run the installer once")
 			elseif button == "Start" and firstPress then
 				PlaySfx("start")
 				state.mode = "update"
@@ -239,7 +244,7 @@ local BrowserInput = function(event)
 			-- there is one. It is the only thing up there that is not a view,
 			-- so it sits after all of them rather than in among them.
 			if isRight and firstPress and state.tabIndex == #TabOrder
-			   and UP.Available() then
+			   and LO.UpdateShowing() then
 				state.zone = "update"
 				PlaySfx("change")
 				Refresh()

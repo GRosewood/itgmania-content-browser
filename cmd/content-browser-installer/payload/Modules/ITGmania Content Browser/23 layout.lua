@@ -71,8 +71,22 @@ LO.UPD_W       = 56
 LO.UPD_PITCH   = 62                             -- what a tab shrinks to
 LO.UPD_RIGHT   = LO.W - LO.LIST_X - 26          -- clear of the loading spinner
 
+-- Whether the update chip is on the tab row at all.
+--
+-- Anything newer counts, including a release the browser cannot install by
+-- itself. UP.Blocked() was written for exactly that case and then never asked:
+-- a release raising minHelper -- which is most of them, since the helper is the
+-- half that gets fixed -- left every player on the old version looking at a row
+-- with nothing new on it, being told nothing, while an update sat waiting.
 function LO.UpdateShowing()
-	return state.open and InBrowsingMode() and UP.Available()
+	return state.open and InBrowsingMode() and (UP.Available() or UP.Blocked())
+end
+
+-- ...and whether pressing it can actually finish the job. A blocked one still
+-- shows, because knowing is the point, but it does not pulse for attention it
+-- cannot reward and Start says what to do instead of failing.
+function LO.UpdateActionable()
+	return UP.Available()
 end
 
 function LO.TabPitch()

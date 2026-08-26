@@ -141,11 +141,15 @@ function CB.Screen.Tabs(ui)
 				self:x(LO.UpdX() - 3):setsize(LO.UPD_W, LO.TAB_H)
 				if Lit() then
 					self:diffuse(AccentColor()):diffusealpha(1)
-				else
+				elseif LO.UpdateActionable() then
 					-- a soft pulse, because this is the only thing on the row
 					-- that appeared on its own rather than always being there
 					local beat = 0.30 + 0.16 * math.sin(GetTimeSinceStart() * 2.4)
 					self:diffuse(AccentColor()):diffusealpha(beat)
+				else
+					-- Still there to be found, but still: a pulse is a promise
+					-- that pressing it does something, and this one cannot.
+					self:diffuse(AccentColor()):diffusealpha(0.22)
 				end
 			end,
 		}

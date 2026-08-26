@@ -9,6 +9,7 @@ local CB = ...
 
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
+local ActiveTabIndex       = CB.ActiveTabIndex
 local BrowserInput         = CB.BrowserInput
 local BuildFeatured        = CB.BuildFeatured
 local CheckHelper          = CB.CheckHelper
@@ -70,6 +71,26 @@ function CB.Screen.Frame()
 				-- the featured grid is where the eye should land first
 				if #state.featured.cards > 0 or state.featured.status == "loading" then
 					state.zone = "featured"
+				elseif #state.packs == 0 then
+					-- ...and the tab row when there is no grid to land on
+					-- either, because a cursor in an empty list is a cursor
+					-- nothing answers.
+					--
+					-- The keyboard filter has no featured grid at all --
+					-- BuildFeatured returns "ready" holding nothing -- so the
+					-- browser opened with the cursor in a pack list that page
+					-- one had not arrived in yet. Down does nothing there: the
+					-- list branch skips its whole body while the list is empty,
+					-- and swallows every arrow outright while a page is in
+					-- flight. So the first press vanished and the second one
+					-- worked, and which you got depended on how quick the
+					-- network was. The tab row always has something on it.
+					--
+					-- The installed view has drawn this line since it was
+					-- written -- zone = packs > 0 and "list" or "tabs" -- and
+					-- this is the same rule, applied where it was missing.
+					state.tabIndex = ActiveTabIndex()
+					state.zone = "tabs"
 				end
 			end
 

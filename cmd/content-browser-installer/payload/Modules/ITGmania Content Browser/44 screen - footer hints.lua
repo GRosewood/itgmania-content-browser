@@ -18,6 +18,7 @@ local ROWS           = CB.ROWS
 local ScrollBar      = CB.ScrollBar
 local Snd            = CB.Snd
 local TabOrder       = CB.TabOrder
+local UP             = CB.UP
 local state          = CB.state
 
 function CB.Screen.FooterHints(ui, listAF, pane)
@@ -27,13 +28,17 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 	ui[#ui+1] = Def.BitmapText{
 		Font = "Common Normal",
 		InitCommand = function(self)
-			self:xy(LO.W/2, LO.CONTENT_BOT + 15):zoom(0.55):diffuse(0.75, 0.75, 0.75, 1):maxwidth((LO.W - 20)/0.55)
+			self:xy(LO.W/2, LO.CONTENT_BOT + 15):zoom(0.55):diffuse(0.75, 0.75, 0.75, 1):maxwidth((LO.W - 200)/0.55)
 		end,
 		SMORefreshMessageCommand = function(self)
 			-- the chip is on the header row, which every browsing view shares,
 			-- so it is answered before the view is looked at
 			if state.zone == "update" and state.mode ~= "update" then
-				self:settext("&START; install it   &MENULEFT; back to the tabs   &BACK; exit")
+				if LO.UpdateActionable() then
+					self:settext("&START; install it   &MENULEFT; back to the tabs   &BACK; exit")
+				else
+					self:settext("run the installer to get this one   &MENULEFT; back to the tabs   &BACK; exit")
+				end
 			elseif state.mode == "list" or InLevelView() then
 				if state.zone == "tabs" then
 					if TabOrder[state.tabIndex] == "search" then
@@ -121,6 +126,38 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 			return state.filtered, ROWS, (state.page - 1) * ROWS
 		end,
 		math.sqrt)
+
+	-- Which version this is, in the corner.
+	--
+	-- The hints row rather than a row of its own: the strip under the content
+	-- is forty pixels tall and already carries the installed counts at the top
+	-- of it and the download ticker at the bottom. The right-hand end of this
+	-- row is the one part of the corner nothing else reaches, which is why the
+	-- hints above now keep two hundred pixels clear.
+	--
+	-- UP.VERSION is the module that is RUNNING, which is the honest answer:
+	-- an in-game update writes the new files but the old ones stay loaded
+	-- until ITGmania restarts, and this should not claim otherwise.
+	ui[#ui+1] = Def.BitmapText{
+		Font = "Common Normal",
+		InitCommand = function(self)
+			self:horizalign(right):xy(LO.W - 8, LO.CONTENT_BOT + 15)
+			self:zoom(0.4):diffuse(0.55, 0.55, 0.55, 0.85)
+		end,
+		SMORefreshMessageCommand = function(self)
+			local text = "v" .. UP.VERSION
+			-- The module and the helper are replaced by different things -- an
+			-- in-game update takes only the module, the installer takes both --
+			-- so they can be different versions, and when they are that is the
+			-- answer to most of what looks wrong. Said only when it is true:
+			-- there is nothing to tell a player whose halves agree.
+			local cfg = state.helper.config
+			if cfg and cfg.version and cfg.version ~= UP.VERSION then
+				text = text .. "  helper " .. cfg.version
+			end
+			self:settext(text)
+		end,
+	}
 
 	ui[#ui+1] = listAF
 	ui[#ui+1] = pane
