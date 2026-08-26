@@ -15,9 +15,9 @@ import (
 
 // RelayBase is where this install's browser will look for the relay: the one
 // line of Save/ITGmaniaContentBrowser/webapp.txt when it is there, and the
-// development default otherwise -- the same rule the module applies.
+// deployed relay otherwise -- the same rule the module applies.
 func RelayBase(inst Install) string {
-	base := "http://localhost:3000"
+	base := "https://itgcontent.net"
 	raw, err := os.ReadFile(filepath.Join(HelperDir(inst), "webapp.txt"))
 	if err != nil {
 		return base

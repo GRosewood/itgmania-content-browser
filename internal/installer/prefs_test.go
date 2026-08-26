@@ -35,8 +35,8 @@ func TestMergeHosts(t *testing.T) {
 		},
 		{
 			name:    "case-insensitive match is a no-op",
-			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
-			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
+			in:      "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
+			want:    "StepManiaOnline.NET,*.StepManiaOnline.NET,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,LOCALHOST,127.0.0.1,github.com,*.githubusercontent.com",
 			changed: false,
 		},
 		{
@@ -59,14 +59,14 @@ func TestMergeHosts(t *testing.T) {
 			name: "partial presence adds only what is missing",
 			in:   "stepmaniaonline.net",
 			want: "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance," +
-				"*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
+				"*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,localhost,github.com,*.githubusercontent.com",
 			changed: true,
 		},
 		{
 			// Nothing to do: every host this install needs is already listed.
 			name:    "a complete allowlist is left exactly as it is",
-			in:      "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
-			want:    "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,github.com,*.githubusercontent.com",
+			in:      "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,localhost,github.com,*.githubusercontent.com",
+			want:    "stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,localhost,github.com,*.githubusercontent.com",
 			changed: false,
 		},
 	}

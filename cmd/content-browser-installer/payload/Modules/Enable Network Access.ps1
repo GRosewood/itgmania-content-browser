@@ -24,7 +24,7 @@ $ErrorActionPreference = "Stop"
 #
 # Nothing is ever REMOVED from the list -- an existing GrooveStats entry, or
 # anything another module added, is left exactly where it is.
-$Hosts = @("stepmaniaonline.net", "*.stepmaniaonline.net", "arrowcloud.dance", "*.arrowcloud.dance", "itgdb.net", "*.itgdb.net", "localhost", "127.0.0.1", "github.com", "*.githubusercontent.com")
+$Hosts = @("stepmaniaonline.net", "*.stepmaniaonline.net", "arrowcloud.dance", "*.arrowcloud.dance", "itgdb.net", "*.itgdb.net", "itgcontent.net", "*.itgcontent.net", "localhost", "127.0.0.1", "github.com", "*.githubusercontent.com")
 
 function Report-Done {
     Write-Host "  Start ITGmania and open Find Content from the title menu." -ForegroundColor Green

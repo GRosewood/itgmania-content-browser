@@ -25,7 +25,7 @@ set -uo pipefail
 # Nothing is ever REMOVED from the list -- an existing GrooveStats entry, or
 # anything another module added, is left exactly where it is. Taking away
 # access somebody else may be relying on is not this script's business.
-NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,localhost,127.0.0.1,github.com,*.githubusercontent.com"
+NEW_HOSTS="stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,localhost,127.0.0.1,github.com,*.githubusercontent.com"
 
 report_done() {
     printf '  Start ITGmania and open Find Content from the title menu.\n\n'

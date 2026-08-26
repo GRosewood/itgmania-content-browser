@@ -26,11 +26,15 @@ var Hosts = []string{
 	"*.arrowcloud.dance",
 	"itgdb.net",
 	"*.itgdb.net",
-	// The song-preview relay. In development it runs beside the game and is
-	// reached through localhost -- which resolves to ::1 on Windows, where
-	// WSL's port forwarding actually listens, so this entry is NOT redundant
-	// with 127.0.0.1: the engine matches allowlist entries against the URL's
-	// host as a string, and "localhost" and "127.0.0.1" are different strings.
+	// The song-preview relay, deployed -- audio, chart windows, pack facts
+	// and single-song archives all come through it.
+	"itgcontent.net",
+	"*.itgcontent.net",
+	// ...and the same relay running beside a development machine. localhost
+	// rather than 127.0.0.1 is deliberate: on Windows, WSL's port forwarding
+	// listens on ::1, which localhost resolves to and the address does not --
+	// and the engine matches allowlist entries against the URL's host as a
+	// string, so the two are different entries.
 	"localhost",
 	// The in-game updater: the manifest lives on raw.githubusercontent.com
 	// and the module archive on github.com, whose download redirects land on

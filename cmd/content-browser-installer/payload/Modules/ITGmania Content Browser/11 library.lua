@@ -340,16 +340,16 @@ end
 -- the hollowed group from the wheel.
 
 -- Where the preview relay lives. It reads the catalogue's pack zips with
--- ranged requests and serves the one thing the engine cannot make for
--- itself: playable audio, chart windows, and single-song archives. The
--- default is the relay running beside a development machine; a cabinet
--- whose relay lives elsewhere writes its URL as the one line of
+-- ranged requests and serves the things the engine cannot make for itself:
+-- playable audio, chart windows, pack facts, and single-song archives. The
+-- default is the deployed relay; a machine running its own -- a developer
+-- with the dev server up, say -- writes that URL as the one line of
 -- Save/ITGmaniaContentBrowser/webapp.txt. Read once: a file that has not
 -- changed mid-session is not worth reopening per press.
 local webBase
 local function WebBase()
 	if webBase then return webBase end
-	webBase = "http://localhost:3000"
+	webBase = "https://itgcontent.net"
 	local path = BROWSER_DATA_DIR .. "webapp.txt"
 	if FILEMAN:DoesFileExist(path) then
 		local f = RageFileUtil:CreateRageFile()

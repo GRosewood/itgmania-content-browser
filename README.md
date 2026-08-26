@@ -80,9 +80,10 @@ data. Within those walls:
   `itg-content-webapp`) that reads the catalogue's pack zips with ranged
   requests and serves the game the things its engine cannot make for
   itself: playable audio inflated out of a compressed archive, parsed
-  chart windows, and a single song re-served as a small real zip. In
-  development it runs at `http://localhost:3000`; a cabinet points at a
-  deployed copy by writing its URL as the one line of
+  chart windows, and a single song re-served as a small real zip. The
+  deployed relay at `https://itgcontent.net` is the default; a machine
+  running its own (a developer with the dev server up) points at it by
+  writing that URL as the one line of
   `Save/ITGmaniaContentBrowser/webapp.txt`. Browsing, downloading and
   deletion all work without it.
 * **In-game updates** fetch the release manifest from this repository, verify
@@ -144,8 +145,8 @@ cabinet's startup script can run it.
 Most problems are one of these:
 
 * **"Preview relay: NOT reachable"** — browsing, downloads and deletion all
-  work without it; song previews and single-song installs do not. Start the
-  relay, or put a deployed relay's URL in
+  work without it; song previews and single-song installs do not. Check your
+  internet connection; a machine meant to use its own relay puts that URL in
   `Save/ITGmaniaContentBrowser/webapp.txt`.
 * **"Old helper: ... still registered"** — a leftover from an earlier version
   that ran a background service. Run the installer once; it sweeps the
