@@ -3,8 +3,8 @@
   "notes": "Fixes title-menu navigation (the first press no longer snaps back to the top item) and search paging (charter verification no longer throws you back to page one). Previews, chart windows and single-song installs come from itgcontent.net; downloads, deletion and updates run in the game itself.",
   "module": {
     "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.5/itgmania-content-browser-module-0.5.zip",
-    "sha256": "850d6e507cb2e73eb2a08a13265368551543a0e82fc0b9bdde9f6b893cb25e95",
-    "bytes": 241610
+    "sha256": "e7ee04f7480f63ea8b9addfc96eb20776323a6c88900e1c42bc482d4fd8681a9",
+    "bytes": 246865
   },
   "minHelper": "0.4"
 }
