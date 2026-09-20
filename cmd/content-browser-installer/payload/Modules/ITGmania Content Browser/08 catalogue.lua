@@ -344,28 +344,29 @@ FetchPacks = function(page, keepCursor)
 			return
 		end
 
-		local packs = rows
-		if filteringActive then
-			packs = {}
-			local consumed = #rows
-			for index, pack in ipairs(rows) do
-				if PassesFilter(pack) then
-					packs[#packs+1] = pack
-					if #packs >= ROWS then
-						consumed = index
-						break
-					end
+		-- Keep the first pageful that passes the filter -- never more. The
+		-- screen draws ROWS slots and the cursor logic trusts #state.packs,
+		-- so an uncapped list let Down walk the cursor into rows nothing
+		-- drew, while the page refused to turn.
+		local packs = {}
+		local consumed = #rows
+		for index, pack in ipairs(rows) do
+			if PassesFilter(pack) then
+				packs[#packs+1] = pack
+				if #packs >= ROWS then
+					consumed = index
+					break
 				end
 			end
-			state.pageOffsets[page+1] = serverStart + consumed
-
-			-- everything past this page that also passed, kept as backfill
-			local spare = {}
-			for index = consumed + 1, #rows do
-				if PassesFilter(rows[index]) then spare[#spare+1] = rows[index] end
-			end
-			state.packsSpare = spare
 		end
+		state.pageOffsets[page+1] = serverStart + consumed
+
+		-- everything past this page that also passed, kept as backfill
+		local spare = {}
+		for index = consumed + 1, #rows do
+			if PassesFilter(rows[index]) then spare[#spare+1] = rows[index] end
+		end
+		state.packsSpare = spare
 
 		state.packs      = packs
 		state.pageCache[cacheKey] = { packs = packs, total = recordsFiltered }

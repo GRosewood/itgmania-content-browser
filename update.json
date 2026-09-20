@@ -1,10 +1,10 @@
 {
-  "version": "0.7",
-  "notes": "Song previews and single-song downloads work again on installs where the engine’s own URL encoder let them down — the module now encodes song titles itself. Mines appear in the chart preview instead of leaving a gap where a chart is telling you not to step. The Years tab stops saying it is indexing once it has finished, rather than waiting for you to open a year. The installer also finds the theme your cabinet actually loads when it lives on a mounted drive, and names the directory it wrote to.",
+  "version": "0.8",
+  "notes": "Pressing Down at the bottom of the pack list turns the page again — the cursor had been wandering into rows the screen never drew, and only Right would page. Keyboard packs are left out of the pad list again while that filter was quietly off. And the Beginner tab's 'more' mark now sits at the foot of a full page instead of partway down the next one, so the end of the list reads as the end of the list.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.7/itgmania-content-browser-module-0.7.zip",
-    "sha256": "d77b7cd20d52b01181c853ca363f635d8ac1c94f26b82c5876b5ad66cf855088",
-    "bytes": 242483
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.8/itgmania-content-browser-module-0.8.zip",
+    "sha256": "951446ee1c7bce11a5b438930a7f65f85700e8ad98e404bf9087d93a817d5d05",
+    "bytes": 242780
   },
   "minHelper": "0.5"
 }

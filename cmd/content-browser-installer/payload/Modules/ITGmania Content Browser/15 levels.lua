@@ -62,7 +62,11 @@ local LEVEL = {
 	MIN_HARD    = 3,    -- one or two hard charts does not make a stamina pack
 	HARD_BULK   = 12,   -- ...but this many is a stamina pack whatever else it has
 	MAX_DETAILS = 90,   -- give up after this many detail fetches
-	TARGET      = 400,  -- rows per helping; the list extends when it runs out
+	-- Rows per helping; the list extends when it runs out. A multiple of the
+	-- seven-row page, so a helping that fills pauses at the foot of a full
+	-- page -- where the "&MENUDOWN; more" mark reads as the end of the list
+	-- -- rather than one row onto the next.
+	TARGET      = 399,
 	-- beginner-friendly: down to the 1s, nothing above 14, and a real easy
 	-- ramp rather than one token easy chart.  Measured over arrowcloud's top
 	-- 250: 60 of the 244 that resolve to an SMO pack clear the first two
@@ -578,9 +582,15 @@ local function LevelStepOnce()
 	-- stops after one screen, so four at a time is plenty. Doubles has a whole
 	-- column of candidates to get through and no way to shortcut them, so it
 	-- reads at the same rate as the rest.
+	--
+	-- The limit counts the fetches still in the air, not just the rows in
+	-- hand: each fetch may place a row when it lands, and the callbacks do
+	-- not re-ask. Counting rows alone let a helping of seven finish as nine
+	-- or ten -- and the helping is a page, so the "&MENUDOWN; more" mark
+	-- sat partway down the next page instead of at the foot of a full one.
 	local atOnce = (lv.bucket == "beginner") and 4 or 8
 	while lv.inFlight < atOnce and lv.poolPos < #lv.pool
-	      and LevelFilled(lv) < lv.limit
+	      and LevelFilled(lv) + lv.inFlight < lv.limit
 	      and lv.fetched < lv.budget do
 		lv.poolPos = lv.poolPos + 1
 		local pack = lv.pool[lv.poolPos]
