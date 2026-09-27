@@ -133,7 +133,8 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		inst, ok := installer.Inspect(target)
 		if !ok {
 			return fail("%s does not look like an ITGmania installation\n"+
-				"  (expected a Themes/ directory alongside Data/ or Program/)", target)
+				"  (expected the game itself: a Themes folder beside its executable -\n"+
+				"  not the folder it keeps your settings and songs in)", target)
 		}
 		installs = []installer.Install{inst}
 	} else {

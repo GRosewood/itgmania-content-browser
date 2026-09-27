@@ -206,6 +206,11 @@ version's background helper left anything behind, and whether the preview
 relay is reachable. It exits non-zero when something needs attention, so a
 cabinet's startup script can run it.
 
+On Windows, Setup keeps everything the installer printed in
+`%LOCALAPPDATA%\ITGMania Content Browser\install-log.txt`. When Setup says
+the module could not be installed, the reason it shows comes from there, and
+the whole log is the thing to ask for when helping somebody.
+
 Most problems are one of these:
 
 * **"Preview relay: NOT reachable"** — browsing, downloads and deletion all

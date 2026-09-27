@@ -1,10 +1,10 @@
 {
-  "version": "0.9",
-  "notes": "Downloads now open a window with a progress bar, and pressing Back twice cancels one. The browser waits in that window until the pack is in: the game fetches one file at a time, so pack art and previews would only stall behind it anyway. On the ITG System Image, packs can now go straight onto your songs drive — after updating, quit to System Mode and run the installer again (the browser reminds you once). Nothing to do anywhere else.",
+  "version": "0.9.1",
+  "notes": "Nothing changes in the game with this one. It fixes the Windows installer: pointed at ITGmania's data folder instead of the game, it failed with a message about Preferences.ini, and a fresh install was told network access had not been enabled when it had. Setup now says what actually went wrong, and finds ITGmania in Documents too.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.9/itgmania-content-browser-module-0.9.zip",
-    "sha256": "49fc1499632ab284f0653aa9028c87d8a25bf9d497989e9c44b9974578575180",
-    "bytes": 248935
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.9.1/itgmania-content-browser-module-0.9.1.zip",
+    "sha256": "2af7569bf72862a04f4ba60c05bb15e3698ec574c859af9017ac41a2a2164b62",
+    "bytes": 248939
   },
   "minHelper": "0.5"
 }

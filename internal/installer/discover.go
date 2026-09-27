@@ -179,7 +179,14 @@ func candidateRoots() []string {
 				filepath.Join(home, "ITGmania"),
 				filepath.Join(home, "Games", "ITGmania"),
 				filepath.Join(home, "Desktop", "ITGmania"),
+				// ITGmania's own setup installs here for an account that is
+				// not an administrator
+				filepath.Join(home, "Documents", "ITGmania"),
 			)
+		}
+		// ...and Documents is often OneDrive's
+		if oneDrive := os.Getenv("OneDrive"); oneDrive != "" {
+			add(filepath.Join(oneDrive, "Documents", "ITGmania"))
 		}
 		// Steam library default
 		add(filepath.Join(programFilesX86, "Steam", "steamapps", "common", "ITGmania"))

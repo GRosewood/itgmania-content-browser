@@ -83,6 +83,10 @@ Filename: "{#SupportDir}\{#CoreExe}"; \
   RunOnceId: "RemoveContentBrowser"; \
   Flags: runhidden waituntilterminated
 
+[UninstallDelete]
+; the console installer's log from the last install
+Type: files; Name: "{#SupportDir}\install-log.txt"
+
 [Code]
 var
   DetectedDir: String;
@@ -165,14 +169,33 @@ begin
     Confirm := False;
 end;
 
+// HasGameExe: an executable in Program\, which is what the console installer
+// insists on. The profile folder of a non-portable install (%APPDATA%\ITGmania)
+// mirrors Themes\, NoteSkins\ and Save\ but holds no game, and accepting it
+// here only moved the refusal to the end of the wizard, behind a message that
+// blamed Preferences.ini.
+function HasGameExe(Path: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := FindFirst(AddBackslash(Path) + 'Program\*.exe', FindRec);
+  if Result then
+    FindClose(FindRec);
+end;
+
 // LooksLikeITGmania mirrors the console installer's check: a Themes folder
-// next to another ITGmania marker.
+// beside the game's own executable.
 function LooksLikeITGmania(Path: String): Boolean;
 begin
-  Result := DirExists(AddBackslash(Path) + 'Themes') and
-            (DirExists(AddBackslash(Path) + 'Data') or
-             DirExists(AddBackslash(Path) + 'Program') or
-             DirExists(AddBackslash(Path) + 'NoteSkins'));
+  Result := DirExists(AddBackslash(Path) + 'Themes') and HasGameExe(Path);
+end;
+
+// The folder a non-portable install keeps its settings, songs and themes in:
+// Save\ beside Themes\, and no game.
+function IsProfileFolder(Path: String): Boolean;
+begin
+  Result := DirExists(AddBackslash(Path) + 'Save') and
+            DirExists(AddBackslash(Path) + 'Themes') and not HasGameExe(Path);
 end;
 
 function HasSimplyLove(Path: String): Boolean;
@@ -220,7 +243,8 @@ begin
       Candidates[0] := 'C:\Games\ITGmania';
       Candidates[1] := ExpandConstant('{autopf}\ITGmania');
       Candidates[2] := ExpandConstant('{localappdata}\Programs\ITGmania');
-      Candidates[3] := ExpandConstant('{userdocs}\..\ITGmania');
+      // ITGmania's own setup puts a non-admin install in Documents
+      Candidates[3] := ExpandConstant('{userdocs}\ITGmania');
       Candidates[4] := 'C:\ITGmania';
       Candidates[5] := ExpandConstant('{sd}\Games\ITGmania');
       DetectedDir := '';
@@ -260,6 +284,15 @@ begin
 
   if CurPageID = wpSelectDir then
   begin
+    if IsProfileFolder(WizardDirValue) then
+    begin
+      MsgBox('That is ITGmania''s data folder, where your settings and songs are kept, ' +
+             'not the game itself.' + #13#10 + #13#10 +
+             'Choose the folder ITGmania is installed in: the one that contains the ' +
+             'Program folder (for example C:\Games\ITGmania).', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
     if not LooksLikeITGmania(WizardDirValue) then
     begin
       MsgBox('That folder does not look like an ITGmania installation.' + #13#10 + #13#10 +
@@ -301,53 +334,22 @@ begin
 end;
 
 // ---------------------------------------------------------------------
-// Post-install: run the helper, check that it succeeded, and confirm the
-// allowlist really is in Preferences.ini. A silent failure here would
-// leave the module unable to reach stepmaniaonline.net.
-
-// PrefsPath returns the Preferences.ini this install actually uses:
-// portable installs keep Save/ beside the game, others use %APPDATA%.
-function PrefsPath(AppDir: String): String;
-var
-  Local: String;
-begin
-  Local := AddBackslash(AppDir) + 'Save\Preferences.ini';
-  if FileExists(Local) then
-    Result := Local
-  else
-    Result := ExpandConstant('{userappdata}') + '\ITGmania\Save\Preferences.ini';
-end;
-
-// AllowlistOK mirrors the console installer's own check.
-function AllowlistOK(AppDir: String): Boolean;
-var
-  Lines: TArrayOfString;
-  I: Integer;
-  Line, Lower: String;
-  Enabled, Allowed: Boolean;
-begin
-  Enabled := False;
-  Allowed := False;
-  if LoadStringsFromFile(PrefsPath(AppDir), Lines) then
-  begin
-    for I := 0 to GetArrayLength(Lines) - 1 do
-    begin
-      Line := Trim(Lines[I]);
-      Lower := Lowercase(Line);
-      if Pos('httpenabled=', Lower) = 1 then
-        Enabled := (Trim(Copy(Line, Length('HttpEnabled=') + 1, Length(Line))) = '1');
-      // The one entry an install needs: the loopback helper, which relays
-      // the catalogue hosts itself. Checking for stepmaniaonline.net here
-      // failed every fresh install once the installer stopped writing it.
-      if Pos('httpallowhosts=', Lower) = 1 then
-        Allowed := (Pos('127.0.0.1', Lower) > 0);
-    end;
-  end;
-  Result := Enabled and Allowed;
-end;
+// Post-install: run the console installer and report what it said.
+//
+// Its exit code is the whole answer. Before it exits 0 it reads back the
+// Preferences.ini it wrote and checks every host in the allowlist, and when
+// something is wrong it prints an ERROR or WARNING that names it. This used
+// to be checked a second time here, and that copy drifted: it still wanted
+// the 127.0.0.1 of the old local helper, which no install writes any more,
+// so every fresh machine was told network access was not enabled.
+//
+// The output goes to a log beside it, because the useful part of a failure
+// is the reason, and a generic message about Preferences.ini sent players
+// looking in the wrong place: a wrong folder, a running game and a missing
+// theme all read the same.
 
 // InstallFailed lets the finish page tell the truth instead of showing the
-// normal success text after a failed allowlist write.
+// normal success text after a failed install.
 var
   InstallFailed: Boolean;
   FailureText: String;
@@ -359,9 +361,44 @@ begin
   SuppressibleMsgBox(Msg, mbCriticalError, MB_OK, IDOK);
 end;
 
+// What the console installer printed about its failure: the ERROR or WARNING
+// line and the lines that go with it, up to the blank line that ends them.
+// Empty if the log has none, which means it never got as far as saying.
+function InstallerSaid(LogFile: String): String;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  Line: String;
+  Capturing: Boolean;
+begin
+  Result := '';
+  Capturing := False;
+  if not LoadStringsFromFile(LogFile, Lines) then
+    Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Trim(Lines[I]);
+    if (Pos('ERROR:', Line) = 1) or (Pos('WARNING:', Line) = 1) then
+    begin
+      Capturing := True;
+      Line := Trim(Copy(Line, Pos(':', Line) + 1, Length(Line)));
+      if Line <> '' then
+        Line := Uppercase(Copy(Line, 1, 1)) + Copy(Line, 2, Length(Line));
+    end
+    else if Capturing and (Line = '') then
+      Break;
+    if Capturing and (Line <> '') then
+    begin
+      if Result <> '' then
+        Result := Result + #13#10;
+      Result := Result + Line;
+    end;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Helper: String;
+  Helper, LogFile, Said: String;
   ResultCode: Integer;
 begin
   if CurStep <> ssPostInstall then
@@ -374,7 +411,10 @@ begin
     Exit;
   end;
 
-  if not Exec(Helper, '-install-dir "' + ExpandConstant('{app}') + '" -y -no-banner',
+  // cmd /c is needed to redirect the child's output to a file.
+  LogFile := ExpandConstant('{#SupportDir}\install-log.txt');
+  if not Exec(ExpandConstant('{cmd}'),
+              '/c ""' + Helper + '" -install-dir "' + ExpandConstant('{app}') + '" -y -no-banner > "' + LogFile + '" 2>&1"',
               '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
     Fail('Setup could not run its helper program, so nothing was installed.');
@@ -383,15 +423,17 @@ begin
 
   if ResultCode <> 0 then
   begin
-    Fail('The module could not be installed.' + #13#10 + '' + #13#10 + 'Close ITGmania, make sure Preferences.ini is writable, then run Setup again.');
-    Exit;
+    Said := InstallerSaid(LogFile);
+    if Said = '' then
+      Said := 'Close ITGmania, make sure Preferences.ini is writable, then run Setup again.';
+    // what a game under Program Files looks like to a setup running as the player
+    if Pos('Access is denied', Said) > 0 then
+      Said := Said + #13#10 + #13#10 +
+              'If ITGmania is installed under Program Files, right-click Setup and ' +
+              'choose Run as administrator.';
+    Fail('The module could not be installed.' + #13#10 + #13#10 + Said + #13#10 + #13#10 +
+         'The full log is in:' + #13#10 + LogFile);
   end;
-
-  // The point of this installer: without the loopback entry the module
-  // cannot reach the helper that relays its reads, so never report success
-  // without reading the file back.
-  if not AllowlistOK(ExpandConstant('{app}')) then
-    Fail('The module was installed, but network access was NOT enabled.' + #13#10 + '' + #13#10 + '127.0.0.1 (the local helper) is missing from HttpAllowHosts in:' + #13#10 + PrefsPath(ExpandConstant('{app}')) + #13#10 + '' + #13#10 + 'With ITGmania closed, run "Enable Network Access.bat" from the' + #13#10 + 'Themes\Simply Love\Modules folder, or run Setup again.');
 end;
 
 // Reflect a failed install on the final page rather than saying it finished.
