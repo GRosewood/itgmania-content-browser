@@ -33,7 +33,11 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 		SMORefreshMessageCommand = function(self)
 			-- the chip is on the header row, which every browsing view shares,
 			-- so it is answered before the view is looked at
-			if state.zone == "update" and state.mode ~= "update" then
+			if state.notice or state.dlWatch then
+				-- the installer notice or a download's window is up, and it
+				-- prints its own keys
+				self:settext("")
+			elseif state.zone == "update" and state.mode ~= "update" then
 				if LO.UpdateActionable() then
 					self:settext("&START; install it   &MENULEFT; back to the tabs   &BACK; exit")
 				else
@@ -75,6 +79,9 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 				else
 					self:settext("&MENUUP;&MENUDOWN; packs   &MENULEFT;&MENURIGHT; page   &START; fix sync   &SELECT; remove   &BACK; exit")
 				end
+			elseif state.mode == "detail" and state.libraryAsk then
+				-- the library dialog is up over the page; it prints its own keys
+				self:settext("")
 			elseif state.mode == "detail" and LO.DetailLost(CurrentPack()) then
 				self:settext("&SELECT; try again   &START; download   &BACK; back")
 			elseif state.mode == "detail" then

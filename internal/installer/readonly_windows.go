@@ -9,6 +9,9 @@ import "os"
 // nothing on Windows changes behaviour because of them.
 func readOnlyFS(string) bool { return false }
 
+// mountOf has no /proc/mounts to read on Windows.
+func mountOf(string) (string, bool) { return "", false }
+
 func writableDir(dir string) bool {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false

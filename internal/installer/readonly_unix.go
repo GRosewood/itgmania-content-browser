@@ -21,9 +21,16 @@ import (
 // about the filesystem. The longest mount point that prefixes the path is the
 // one it lives on.
 func readOnlyFS(path string) bool {
+	point, ro := mountOf(path)
+	return point != "" && ro
+}
+
+// mountOf is the mount point a path lives on, and whether that is mounted
+// read-only, or "" when /proc/mounts cannot say.
+func mountOf(path string) (point string, readOnly bool) {
 	mounts, err := os.ReadFile("/proc/mounts")
 	if err != nil {
-		return false // not Linux, or no procfs: do not guess
+		return "", false // not Linux, or no procfs: do not guess
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -52,7 +59,7 @@ func readOnlyFS(path string) bool {
 			}
 		}
 	}
-	return best != "" && ro
+	return best, ro
 }
 
 // underMount reports whether path sits at or below a mount point.

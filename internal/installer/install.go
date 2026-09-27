@@ -19,6 +19,7 @@ type InstallResult struct {
 	Replaced   []string // superseded files removed during an upgrade
 	Prefs      PrefsResult
 	Helper     HelperResult
+	Libraries  []Library // the player's own song folders, in the order downloads try them
 }
 
 // HelperResult reports what was cleaned off an install that used to run the
@@ -162,9 +163,13 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 	// -- but nothing can be written into it, and "read-only file system" on its
 	// own does not tell anybody which of the paths on screen was the problem.
 	if readOnlyFS(themeDir) {
+		hint := ""
+		if _, ok := FindSystemImage(inst); ok {
+			hint = systemModeHint
+		}
 		return res, fmt.Errorf("%s is on a read-only filesystem, so the module"+
 			" cannot be installed into it; remount it writable, or install into"+
-			" a copy of the theme that is not read-only", themeDir)
+			" a copy of the theme that is not read-only%s", themeDir, hint)
 	}
 
 	res.ModulesDir = filepath.Join(themeDir, "Modules")
@@ -191,6 +196,10 @@ func Apply(inst Install, files ModuleFiles) (InstallResult, error) {
 		return res, err
 	}
 	res.Prefs = prefs
+
+	// Where a pack downloaded in the game will land, for saying so: the game
+	// itself passes over a folder it may not write to without a word.
+	res.Libraries = Libraries(inst)
 
 	// Nothing is set up any more -- the game fetches, unzips and truncates
 	// for itself, and previews come from the web relay. What remains is

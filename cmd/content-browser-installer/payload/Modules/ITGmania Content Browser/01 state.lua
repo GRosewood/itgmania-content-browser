@@ -105,6 +105,11 @@ local state = {
 		zone      = "pick",
 	},
 	downloads     = {},      -- packId -> {status,cur,total,msg,groups}
+	libraryAsk    = nil,     -- a download waiting on "your library is read-only"
+	libraryOk     = nil,     -- ...and whether this session already said go ahead
+	dlWatch       = nil,     -- the download whose progress window is up (DL.Watch)
+	dlCancelArmed = nil,     -- ...and whether Back has been pressed once to cancel it
+	notice        = nil,     -- {title, body}: something only the installer can fix
 	banners       = {},      -- url -> local VFS path (once cached)
 	bannerBusy    = {},      -- url -> true while downloading
 	bannerQueue   = {},      -- urls waiting for a download slot

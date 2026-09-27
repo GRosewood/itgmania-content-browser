@@ -130,7 +130,9 @@ end
 function Snd.ProgLabel()
 	local p = Snd.prog
 	if not p then return "loading sample...", -1 end
-	if p.phase == "audio" then
+	-- "downloading" is what the progress callback records; "audio" was the
+	-- helper's name for the same thing, and the percentage never showed
+	if p.phase == "audio" or p.phase == "downloading" then
 		return "loading sample  " .. math.floor(Clamp(p.frac, 0, 1) * 100 + 0.5) .. "%", p.frac
 	end
 	if p.phase == "writing" then return "loading sample  100%", 1 end

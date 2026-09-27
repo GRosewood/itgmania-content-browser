@@ -60,6 +60,7 @@ func main() {
 		userFlag      = flag.String("user", "", "the account ITGmania runs as (default: work it out)")
 		verboseFlag   = flag.Bool("verbose", false, "list every file installed or removed")
 		checkFlag     = flag.Bool("check", false, "report whether the browser will actually work on this machine, and exit")
+		songsFlag     = flag.Bool("songs-drive-writable", false, "ITG System Image: keep the songs drive writable while the game runs, so packs downloaded in the game go there (asked when not given)")
 	)
 	flag.Parse()
 
@@ -97,7 +98,7 @@ func main() {
 	}
 
 	code := run(*targetFlag, *yesFlag, *uninstallFlag, *listFlag, *noBannerFlag,
-		*themeFlag, *listThemeFlag, *verboseFlag)
+		*themeFlag, *listThemeFlag, *verboseFlag, *songsFlag)
 	// Double-clicked on Windows: keep the console up so the result is readable.
 	if runtime.GOOS == "windows" && !*yesFlag && isDoubleClicked() {
 		fmt.Print("\nPress Enter to close...")
@@ -107,7 +108,7 @@ func main() {
 }
 
 func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
-	wantTheme string, listThemes, verbose bool) int {
+	wantTheme string, listThemes, verbose, songsDrive bool) int {
 	fmt.Println()
 	if !noBanner && !listOnly {
 		if banner.Render(os.Stdout, assets.FS, assets.BannerPath, banner.TerminalWidth()-2) {
@@ -297,6 +298,13 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	// ITGmania rewrites Preferences.ini from memory on exit, so a running
 	// game would discard the allowlist change.
 	if installer.GameRunning() {
+		// On the image there is no closing the game: it restarts itself unless
+		// it was quit into System Mode, which is also the one place the
+		// theme's partition can be written.
+		if _, ok := installer.FindSystemImage(inst); ok {
+			return fail("ITGmania is running. On the ITG System Image, turn Caps Lock on and\n" +
+				"  press Alt+F4 to quit to System Mode, then run this again from there.")
+		}
 		return fail("ITGmania is running. Close it completely, then run this again.")
 	}
 
@@ -304,6 +312,12 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		removed, err := installer.Uninstall(inst, modules)
 		if err != nil {
 			return fail("%v", err)
+		}
+		// The songs drive change goes with the browser: without it nothing
+		// downloads during play, and a read-only drive is the image's own way.
+		// Said on its own line, like any other edit to a boot script.
+		if path, ok := installer.PutSongsDriveBack(inst); ok {
+			fmt.Printf("  Songs drive:    read-only during play again (block taken out of %s)\n", path)
 		}
 		if len(removed) == 0 {
 			fmt.Println("  Nothing to remove - the module was not installed here.")
@@ -377,6 +391,21 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 		fmt.Println("  Old helper:     removed (" + strings.Join(res.Helper.Removed, ", ") + ")")
 	}
 
+	// The songs drive on the ITG System Image, and then where downloads go --
+	// the latter said after the former, because the former changes it.
+	libs, songsDriveNow := res.Libraries, ""
+	if img, ok := installer.FindSystemImage(inst); ok {
+		libs, songsDriveNow = offerSongsDrive(inst, img, libs, assumeYes, songsDrive)
+	}
+	printLibraries(inst, libs)
+
+	// What this run did, for the in-game updater to read: an update brings the
+	// module and nothing else, so a machine whose installer is older than a
+	// change only the installer can make gets told so in the game.
+	if err := installer.RecordInstall(inst, branding.Version, songsDriveNow); err != nil {
+		fmt.Printf("  (could not leave a note of this install for the game: %v)\n", err)
+	}
+
 	// Say which of the three things is wrong. The old message covered a
 	// missing Preferences.ini and a missing host entry with the same words,
 	// and only one of them is fixed by re-running the installer.
@@ -390,6 +419,114 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	fmt.Println()
 	fmt.Printf("  Done. Start ITGmania - %q is on the title menu, above Exit.\n", branding.MenuLabel)
 	return 0
+}
+
+// printLibraries lists the song folders the player set up and says where a
+// pack downloaded in the game will land. The game itself never says: a folder
+// it may not write to is passed over in silence and the unzip reports success,
+// so on a cabinet whose library is read-only while the game runs, packs pile
+// up somewhere nobody thought to look. Nothing is printed when no folder of
+// the player's own is set up -- the game's own Songs folder is the library.
+func printLibraries(inst installer.Install, libs []installer.Library) {
+	if len(libs) == 0 {
+		return
+	}
+	for i, lib := range libs {
+		label := "  Song folders:   "
+		if i > 0 {
+			label = "                  "
+		}
+		status := "cannot be written right now"
+		switch {
+		case lib.Pending:
+			status = "writable during play from the game's next start"
+		case lib.ReadOnlyPref:
+			status = "read-only to the game (set up as ...ReadOnly)"
+		case lib.ReadOnlyFS:
+			status = "on a filesystem mounted read-only right now"
+		case lib.Writable:
+			status = "writable"
+		}
+		fmt.Printf("%s%s -- %s\n", label, lib.Dir, status)
+	}
+	dest := installer.DownloadsGoTo(inst, libs)
+	fmt.Printf("  Downloads to:   %s\n", dest)
+	for _, lib := range libs {
+		if lib.Dir == dest && lib.ReadOnlyFS && !lib.Pending {
+			for _, line := range wrap("While that filesystem stays read-only, the game passes"+
+				" over it and puts packs in "+installer.DownloadsFallBackTo(inst, libs)+
+				" instead.", 68) {
+				fmt.Printf("    %s\n", line)
+			}
+			break
+		}
+	}
+}
+
+// offerSongsDrive makes the ITG System Image's songs drive writable while the
+// game runs, if the player wants that, and returns the song folders as the
+// game will see them from its next start, with what was decided ("writable"
+// or "read-only") for the note the in-game updater reads -- or "" when the
+// change was wanted and could not be made, so the game goes on saying so.
+//
+// Asked rather than assumed, because a read-only library is the image's
+// design: a cabinet can be switched off at the wall mid-game and the songs
+// survive. -y alone never changes it; -songs-drive-writable does.
+func offerSongsDrive(inst installer.Install, img installer.SystemImage,
+	libs []installer.Library, assumeYes, flagged bool) ([]installer.Library, string) {
+	want := img.Writable || flagged
+	if !want && !assumeYes {
+		fmt.Println()
+		for _, line := range wrap("This is the ITG System Image. Its songs drive, "+img.MountPoint+
+			", is read-only while the game runs, so packs downloaded in the game go to "+
+			installer.DownloadsGoTo(inst, libs)+" instead. The installer can keep the"+
+			" drive writable during play; a power cut in the middle of a download can"+
+			" then damage the pack being downloaded.", 70) {
+			fmt.Println("  " + line)
+		}
+		fmt.Println()
+		want = askYes("Keep " + img.MountPoint + " writable during play?")
+		fmt.Println()
+	}
+	if !want {
+		fmt.Println("  Songs drive:    read-only during play (the image's own setting)")
+		for _, line := range wrap("Run the installer again with -songs-drive-writable to have"+
+			" downloads go to "+img.SongsDir+".", 68) {
+			fmt.Printf("    %s\n", line)
+		}
+		return libs, "read-only"
+	}
+
+	backup, err := installer.MakeSongsDriveWritable(img)
+	if err != nil {
+		fmt.Printf("  Songs drive:    NOT changed -- %v\n", err)
+		return libs, ""
+	}
+	switch {
+	case img.Writable && backup == "":
+		fmt.Printf("  Songs drive:    writable during play (already set up in %s)\n", img.StartScript)
+	case img.Writable:
+		fmt.Printf("  Songs drive:    writable during play (brought up to date in %s)\n", img.StartScript)
+	default:
+		fmt.Println("  Songs drive:    writable during play, from the game's next start")
+		fmt.Printf("    added to %s\n", img.StartScript)
+	}
+	if backup != "" {
+		fmt.Printf("    backup: %s\n", filepath.Base(backup))
+	}
+	return installer.WithWritableSongs(libs, img.SongsDir), "writable"
+}
+
+// askYes asks a yes-or-no question. Anything but yes is no, including no
+// answer at all.
+func askYes(question string) bool {
+	fmt.Printf("  %s [y/N]: ", question)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 // wrap breaks a sentence at word boundaries so a note reads as prose in the
@@ -447,6 +584,21 @@ func runCheck(target string) int {
 		problems++
 	}
 	fmt.Printf("  Module in:      %s\n", inst.ModuleThemeDir())
+	// Information rather than a fault: a library that is read-only while the
+	// game runs is how the ITG System Image is meant to work. What matters is
+	// that somebody can find out where downloads will go.
+	libs := installer.Libraries(inst)
+	if img, ok := installer.FindSystemImage(inst); ok {
+		if img.Writable {
+			fmt.Printf("  Songs drive:    writable during play (%s)\n", img.StartScript)
+			libs = installer.WithWritableSongs(libs, img.SongsDir)
+		} else {
+			fmt.Println("  Songs drive:    read-only during play (the ITG System Image's own setting)")
+			fmt.Println("    Run the installer with -songs-drive-writable to have downloads go")
+			fmt.Printf("    to %s instead.\n", img.SongsDir)
+		}
+	}
+	printLibraries(inst, libs)
 	fmt.Println()
 
 	// Three separate failures, three separate answers. Collapsing them into

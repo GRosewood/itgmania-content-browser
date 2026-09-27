@@ -33,7 +33,7 @@ func mounted(t *testing.T, key, packName string) (Install, string) {
 
 	// where the pack really is, for each kind of mount
 	packRoot := drive
-	if key == "AdditionalFolders" {
+	if key == "AdditionalFolders" || key == "AdditionalFoldersWritable" {
 		packRoot = filepath.Join(drive, "Songs")
 	}
 	pack := filepath.Join(packRoot, packName)

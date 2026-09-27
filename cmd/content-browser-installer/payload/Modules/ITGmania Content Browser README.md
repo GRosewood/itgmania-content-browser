@@ -218,15 +218,17 @@ download and install packs without ever leaving the game.
   see; the two doubles columns have one each. The featured grid uses a row of
   dots instead — **one per page**, with the page you are on lit — which reads
   as a position rather than a progress meter.
-- **Direct downloads** — packs download in the background with a progress bar,
-  several at once if you start several, with a queue in the top corner. The
-  helper does the downloading and unpacking, straight into the song folder you
-  actually configured: every song folder is mounted at the same place inside
-  the game, so the engine's own unzip always lands in `<install>/Songs` even
-  when your library is a mounted drive. Without the helper the engine's unzip
-  is used as a fallback, and that is where it goes. When you leave the browser
-  it offers ITGmania's fast differential song reload so the new packs appear
-  immediately.
+- **Direct downloads** — a download opens a window with its progress, and the
+  browser waits there until the pack is in (see *One download at a time*
+  below); pressing Back twice cancels it. The
+  game unpacks each one into your own song folder when you have set one up
+  (`AdditionalSongFoldersWritable` first, then the `Songs/` of an
+  `AdditionalFoldersWritable` tree), and into its own `Songs` folder
+  otherwise. A song folder set up read-only is one the game will not write
+  to, and it quietly uses another folder instead -- so when yours is, the
+  browser says where a pack will go and asks first, once a session. When you
+  leave the browser it offers ITGmania's fast differential song reload so the
+  new packs appear immediately.
 
 ## Install
 
@@ -236,6 +238,14 @@ needs — nothing to unzip, no config files to edit.
 
 Then start ITGmania: *Find Content* is on the title menu, between **Options**
 and **Exit**.
+
+On the **ITG System Image**, run the Linux installer from System Mode (Caps
+Lock on, then Alt+F4 to quit the game): the theme lives on the image's
+root partition, which is read-only everywhere else. The installer also offers
+to keep the songs drive writable while the game runs, so downloads land on it
+rather than on `/mnt/stepmania`. An image update, or updating Simply Love with
+Win+S, takes the browser out of the theme; run the installer again after
+either.
 
 ### Installing by hand instead
 
@@ -316,7 +326,7 @@ inside the dialog itself.
 
 ## Updating
 
-The browser is version **0.1**, and it can update itself.
+The browser can update itself.
 
 When a newer one has been published, an **UPDATE** button appears at the right
 end of the tab row -- the tabs close up to make room for it, and it is only
@@ -328,16 +338,18 @@ you stand: no restart, no going back to the desktop.
 If the download does not match its checksum, nothing is written and the dialog
 says so. Your copy is left exactly as it was.
 
-Some releases need a newer helper as well as a newer module -- the helper is a
-program, and a running one cannot overwrite itself on Windows. Those say so
-instead of offering a button, and you run the installer once as you did the
-first time.
+An update brings the browser's own files and nothing else. A release the game
+cannot install by itself says so instead of offering a button, and you run the
+installer once as you did the first time. And when a release also needs the
+installer to change something on your machine -- as keeping the ITG System
+Image's songs drive writable does -- the browser tells you so the first time
+it opens after updating, and once a session after that until the installer
+has been run again.
 
-The check itself is made by the helper rather than by the game, and only when
-the browser is opened. That is not for tidiness: the engine will only talk to
-hosts on its own allowlist, and making you add another one to be told about an
-update would be a poor trade. If the check cannot reach the internet -- a
-cabinet on a closed network, say -- nothing appears and nothing complains.
+The check itself is made by the game, and only when the browser is opened: it
+reads a small manifest from GitHub, which the installer puts on the allowlist
+for exactly this. If the check cannot reach the internet -- a cabinet on a
+closed network, say -- nothing appears and nothing complains.
 
 ## Removing packs
 
@@ -352,27 +364,15 @@ the engine's Ctrl+Backspace shortcut on the music wheel, gated by the
 `AllowSongDeletion` preference — that is C++, unreachable from Lua, and removes
 a single *song* rather than a pack.)
 
-What a theme *can* do is make an HTTP request, and the engine's allowlist
-matches on host alone. So the installer adds `127.0.0.1` to `HttpAllowHosts`
-and leaves a small local service running that does the deleting. It listens on
-loopback only, on a port the OS assigns, and every request must carry a token
-regenerated each time it starts and stored where only this module can read it.
-It starts with your session and does nothing until the browser asks it to.
+What Lua *can* do is open a file for writing, which empties it. So removing a
+pack empties every file in it -- the disk space comes back at once -- and the
+next song reload drops the emptied pack from the music wheel. The folders stay
+behind, empty, a few kilobytes in all, because nothing in reach can remove a
+folder.
 
-It has since grown three more jobs, all for the same reason — they are things
-Lua cannot do: it **downloads and unpacks** a pack into the song folder you
-actually configured (the engine's own unzip cannot be aimed anywhere but
-`<install>/Songs`), it **reads one song's audio and its charts** out of a pack
-over HTTP range requests so a preview does not need the pack, and it
-**installs a single song** into the singles folders. Without it the browser
-still works: downloads fall back to the engine's unzip, and the parts that
-cannot fall back say so.
-
-The service refuses any name that does not resolve to a plain folder directly
-inside a `Songs/` directory, so a malformed request cannot reach outside your
-song library. If it is not running, the Installed Packs tab says "removal
-unavailable" instead of offering a button that would not work; re-running the
-installer sets it up again.
+A pack on a song folder the game may only read cannot be emptied from inside
+the game, and the browser says so. On the ITG System Image that is the songs
+drive, unless the installer has made it writable during play.
 
 One wrinkle worth knowing: the engine keeps its song list in memory, so a
 deleted pack stays in the music wheel until songs are reloaded. The browser
@@ -380,14 +380,18 @@ offers that reload when you leave, exactly as it does after a download.
 
 ## Notes & known quirks
 
-- **Install hitch:** with no helper the engine unzips a pack synchronously,
-  so the game may freeze for a few seconds as a download reaches 100% — the
-  same behaviour as Simply Loves built-in GrooveStats unlock downloads. The
-  helper unpacks off the games thread, so with it installed there is no hitch.
-- **Downloads continue in the background** if you leave the browser; a system
-  message appears when a pack finishes installing. The top corner carries a
-  queue: up to three rows with their own progress bars, and a count of the
-  rest. Single songs queue there alongside packs.
+- **Install hitch:** the engine unzips a pack in one go, so the game may
+  freeze for a few seconds as a download reaches 100% — the same behaviour as
+  Simply Love's built-in GrooveStats unlock downloads.
+- **One download at a time.** ITGmania fetches everything it saves to disk --
+  packs, banners, song art, preview audio -- over one connection, one file at
+  a time, and a theme has no other way to get a picture or a sound onto the
+  disk. While a pack is coming in, nothing else a page asked for would load,
+  so the browser holds on the download's window until it is in, then puts it
+  away with a note saying the pack is installed. A failed download stays up
+  saying why until you close it. Leave the browser some other way -- the
+  operator key -- and the download carries on; a system message says when it
+  is installed, and its window is back if you return before then.
 - **Banner cache:** banners are cached in `Cache/ITGmaniaContentBrowser/Banners/`
   so they don't re-download every session — under the game's Cache folder,
   wherever that lives on your machine, because it is refetchable data and

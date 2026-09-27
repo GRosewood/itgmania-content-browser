@@ -8,13 +8,16 @@ package installer
 // them and nothing in Lua can tell them apart.
 //
 // That matters when writing. The file manager picks a driver for a new file by
-// counting how many directories it would have to create, lowest wins, ties
-// going to the earliest-loaded driver. Every driver ties on a pack that does
-// not exist yet, so the engine's own unzip always lands in <install>/Songs --
-// even when the player has pointed the game at a mounted drive and that Songs
-// directory is a stub on a system disk that may not be writable at all.
+// counting how many directories it would have to create, lowest wins, and a
+// tie goes to the NEWEST mount -- every mount is inserted at the front of the
+// driver list. So a pack that does not exist yet lands in the player's folder,
+// not <install>/Songs, whenever that folder takes the write; an earlier note
+// here said the opposite, and the engine was run to settle it (library.go has
+// the whole rule). What goes wrong instead is a folder that refuses: the
+// engine moves on to the next one without a word.
 //
-// So the helper does the writing, and this file is how it knows where.
+// This file answered "where" for the helper, which did its own writing; the
+// helper is gone, and library.go now reports it for the installer.
 
 import (
 	"os"

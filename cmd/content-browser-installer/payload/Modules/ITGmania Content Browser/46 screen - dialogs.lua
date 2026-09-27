@@ -12,6 +12,8 @@ local CB = ...
 local AccentColor   = CB.AccentColor
 local Clamp         = CB.Clamp
 local CurrentPack   = CB.CurrentPack
+local DL            = CB.DL
+local FormatBytes   = CB.FormatBytes
 local InstalledPack = CB.InstalledPack
 local LO            = CB.LO
 local Snd           = CB.Snd
@@ -347,6 +349,37 @@ function CB.Screen.Dialogs(af, ui)
 					(not have) and true or nil }
 		end, { "play.png", "download.png", "download.png" }, nil, 3)
 
+	-- A download about to land outside the player's library: their song folder
+	-- is listed read-only, and the engine would put the pack somewhere else
+	-- without a word. Asked once a visit (DL.Gate), over the detail page, which
+	-- stays in its own mode underneath.
+	af[#af+1] = DialogFrame("LibraryDialog",
+		function() return state.mode == "detail" and state.libraryAsk ~= nil end,
+		function()
+			local ask = state.libraryAsk
+			if not ask then return "", "" end
+			local what = (ask.song and ask.song.title)
+				or (ask.pack and ask.pack.name) or ""
+			local body = what .. "\n\n"
+				.. "Your song library, " .. ask.dir .. ", is read-only to the game, so this"
+				.. " would go into " .. DL.InsteadWords(ask) .. " instead.\n\n"
+				.. "On the ITG System Image, run the Content Browser installer again"
+				.. " in System Mode to make the songs drive writable during play."
+			return "Your Library Is Read-Only", body,
+				"&START; download it there anyway    &BACK; cancel"
+		end, 250)
+
+	-- A change on this machine that only the installer can make (see
+	-- UP.InstallerNotice), told once a session when the browser opens -- which,
+	-- after an in-game update, is the moment the new version first comes up.
+	af[#af+1] = DialogFrame("InstallerNoticeDialog",
+		function() return state.notice ~= nil end,
+		function()
+			local n = state.notice
+			if not n then return "", "" end
+			return n.title, n.body, "&START; OK"
+		end, 250)
+
 	af[#af+1] = DialogFrame("RemovePackDialog",
 		function() return state.mode == "removeconfirm" end,
 		function()
@@ -561,4 +594,95 @@ function CB.Screen.Dialogs(af, ui)
 			return { "ITG  (+9ms)", "NULL  (0ms)" },
 				(state.syncChoice == "ITG") and 1 or 2
 		end, nil, true)
+
+	-- A download's progress window (DL.Watch), drawn last: while it is up it is
+	-- the whole of the browser, since the engine's one download connection would
+	-- hold back anything else a page asked for.
+	local DL_H = 200
+	local function Watched()
+		return state.dlWatch and state.downloads[state.dlWatch] or nil
+	end
+	af[#af+1] = DialogFrame("DownloadDialog",
+		function() return Watched() ~= nil end,
+		function()
+			local dl = Watched()
+			if not dl then return "", "" end
+			local name = tostring(dl.name or "")
+			if dl.status == "error" then
+				return "Download Failed", name .. "\n\n" .. tostring(dl.msg or "something went wrong"),
+					"&START;&BACK; close"
+			end
+			local title = dl.single and "Getting a Song" or "Downloading"
+			if dl.status == "installing" then
+				return title, name .. "\n\nUnpacking...", ""
+			end
+			if dl.cancelling then
+				return title, name .. "\n\nCancelling...", ""
+			end
+			-- FormatBytes has nothing to say for 0, and a download can sit at 0
+			-- for seconds while the art ahead of it on the connection comes in
+			local cur = tonumber(dl.cur) or 0
+			local got = cur > 0 and FormatBytes(cur) or "0 MB"
+			local size = (tonumber(dl.total) or 0) > 0
+				and (got .. " of " .. FormatBytes(dl.total)) or (got .. " so far")
+			local body = name .. "\n" .. size
+			if dl.into then body = body .. "\ninto " .. dl.into end
+			body = body .. "\n\nThe game downloads one file at a time, so the"
+				.. " browser waits here until this one is in."
+			local hint = state.dlCancelArmed
+				and "&BACK; again to cancel it    &START; keep downloading"
+				or "&BACK; cancel"
+			return title, body, hint
+		end, DL_H)
+
+	-- its progress bar, above the key line
+	do
+		local BAR_W, BAR_Y = LO.DIALOG_W - 96, DL_H/2 - 40
+		local function Showing()
+			local dl = Watched()
+			return state.open and not state.textEntryOpen and dl ~= nil
+				and dl.status ~= "error"
+		end
+		-- -1 while the size is not known; unpacking is a download that is in
+		local function Fraction()
+			local dl = Watched()
+			if not dl then return -1 end
+			if dl.status == "installing" or dl.status == "done" then return 1 end
+			local total = tonumber(dl.total) or 0
+			if total <= 0 then return -1 end
+			return Clamp((tonumber(dl.cur) or 0) / total, 0, 1)
+		end
+
+		af[#af+1] = Def.Quad{
+			InitCommand = function(self)
+				self:xy(LO.W/2, LO.H/2 + BAR_Y):setsize(BAR_W, 5)
+				self:diffuse(1, 1, 1, 0.14):visible(false)
+			end,
+			SMORefreshMessageCommand = function(self) self:visible(Showing()) end,
+		}
+		af[#af+1] = Def.Quad{
+			InitCommand = function(self)
+				self:horizalign(left):xy(LO.W/2 - BAR_W/2, LO.H/2 + BAR_Y)
+				self:setsize(0, 5):visible(false)
+			end,
+			SMORefreshMessageCommand = function(self)
+				self:visible(Showing())
+				if not Showing() then return end
+				local frac = Fraction()
+				self:diffuse(AccentColor())
+				if frac < 0 then
+					-- nothing to measure yet: a sliver that breathes, so the
+					-- bar reads as working rather than as stuck at zero
+					local beat = 0.5 + 0.5 * math.sin(GetTimeSinceStart() * 3)
+					self:diffusealpha(0.35 + 0.3 * beat)
+					self:setsize(math.max(4, BAR_W * 0.12), 5)
+					self:x(LO.W/2 - BAR_W/2 + (BAR_W - BAR_W*0.12) * beat)
+				else
+					self:diffusealpha(0.95)
+					self:x(LO.W/2 - BAR_W/2)
+					self:setsize(math.max(2, BAR_W * frac), 5)
+				end
+			end,
+		}
+	end
 end

@@ -40,6 +40,20 @@ function CB.Screen.Frame()
 			-- stale UI state from a previous visit must not linger
 			state.loadErr = nil
 			state.loading = false
+			-- a question left open when the browser closed is not asked again;
+			-- a yes to downloading outside the library stands for the session
+			state.libraryAsk = nil
+			state.notice = nil
+			-- A download still coming in from an earlier visit -- the browser
+			-- can be left without Back, by the operator key -- holds it again,
+			-- and one that failed meanwhile still says so.
+			state.dlCancelArmed = nil
+			if not (state.dlWatch and state.downloads[state.dlWatch]) then
+				state.dlWatch = nil
+			end
+			for key, dl in pairs(state.downloads) do
+				if dl.status == "active" then state.dlWatch = key end
+			end
 			-- a search or year slice belongs to the visit that made it; keeping it
 			-- would show those rows under whichever tab happens to be active
 			state.localRows = nil
@@ -54,6 +68,17 @@ function CB.Screen.Frame()
 			end
 			state.blockedReason = LO.BlockedReason()
 			state.mode = state.blockedReason and "blocked" or "list"
+			-- A change on this machine that only the installer can make, told
+			-- once a session -- which, after an in-game update, is the moment
+			-- the new version first opens. Not over the network warning, which
+			-- sends the player to the installer already.
+			if state.mode == "list" and not state.dlWatch and not UP.noticeShown then
+				local title, body = UP.InstallerNotice()
+				if title then
+					state.notice = { title = title, body = body }
+					UP.noticeShown = true
+				end
+			end
 			if state.mode == "list" then
 				FetchPackTypes()
 				local stale = (state.lastFetch == nil) or (GetTimeSinceStart() - state.lastFetch > REFRESH_SECS)

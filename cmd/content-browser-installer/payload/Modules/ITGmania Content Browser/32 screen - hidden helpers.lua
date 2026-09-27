@@ -10,6 +10,7 @@ local CB = ...
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
 local BROWSER_SCREEN             = CB.BROWSER_SCREEN
+local DL                         = CB.DL
 local DownloadsActive            = CB.DownloadsActive
 local LO                         = CB.LO
 local ReclaimInputAfterTextEntry = CB.ReclaimInputAfterTextEntry
@@ -43,6 +44,9 @@ function CB.Screen.HiddenHelpers(af)
 			-- on "Downloading..." through an update that had already finished.
 			if state.open and (DownloadsActive() or UP.Busy()
 			   or LO.DetailTicking()) then
+				-- a download's progress is not reported; it is read off the
+				-- disk here (see DL.Measure)
+				DL.Measure()
 				Refresh()
 				self:sleep(0.2):queuecommand("SMOHeartbeat")
 			end

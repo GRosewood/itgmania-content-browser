@@ -9,6 +9,7 @@ local CB = ...
 
 -- What this part uses from the parts before it. Everything named here was
 -- set by a file that has already run; nothing here reaches forwards.
+local DL                   = CB.DL
 local LEVEL                = CB.LEVEL
 local LiftAboveSystemLayer = CB.LiftAboveSystemLayer
 local Refresh              = CB.Refresh
@@ -124,6 +125,34 @@ end
 -- An update is being installed right now.
 function UP.Busy()
 	return UP.job ~= nil and UP.job.done ~= true
+end
+
+-- A change on this machine that only the installer can make, and that it has
+-- not made: a title and words for it, or nil.
+--
+-- An in-game update brings this module's files and nothing else, and the game
+-- cannot run the installer. So a release that needs the installer on some
+-- machines says so here, once a session, until the installer has been run.
+-- One so far: the installer now offers to keep the ITG System Image's songs
+-- drive writable while the game runs, so that downloads land on it instead of
+-- on the data partition. An installer that knows about that leaves a note
+-- whichever way it was answered (DL.InstallerRecord); the ones from before it
+-- leave none, which is what marks a machine that came here by updating.
+function UP.InstallerNotice()
+	if not (HOOKS and HOOKS:GetArchName() == "Unix") then return nil end
+	local lib = DL.ReadOnlyLibrary()
+	-- the image, by the folders its start script sets on every start
+	if not (lib and lib.dir:find("^/mnt/songs/") and lib.instead == "/mnt/stepmania/Songs") then
+		return nil
+	end
+	if DL.InstallerRecord().version then return nil end
+	return "Run the Installer Again",
+		"This version can download packs straight onto your songs drive, "
+		.. lib.dir .. ". On the ITG System Image that drive is read-only while"
+		.. " the game runs, so for now packs still go into " .. lib.instead .. ".\n\n"
+		.. "An update from inside the game cannot change that. Quit to System Mode"
+		.. " (Caps Lock on, then Alt+F4) and run the Content Browser installer again:"
+		.. " it will offer to."
 end
 
 -- Where update news lives: the repo's own manifest, the same file the old

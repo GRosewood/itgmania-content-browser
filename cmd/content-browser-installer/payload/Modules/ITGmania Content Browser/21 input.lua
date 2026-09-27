@@ -71,6 +71,8 @@ local function OpenDetail(pack)
 	state.songPick = 1
 	state.detailZone = "songs"
 	state.detailFailed[pack.id] = nil
+	-- a question about some other pack's download is not this page's
+	state.libraryAsk = nil
 	FetchDetail(pack, nil, true)
 	Refresh()
 end
@@ -94,6 +96,51 @@ local BrowserInput = function(event)
 
 	-- restart the download-progress heartbeat on any input, just in case
 	if refs.heart then refs.heart:playcommand("SMOArmHeartbeat") end
+
+	-- The installer notice sits over whatever view opened beneath it, and any
+	-- answer puts it away; nothing else a key could mean reaches the view.
+	if state.notice then
+		if (button == "Start" or button == "Back") and firstPress then
+			PlaySfx("start")
+			state.notice = nil
+			Refresh()
+		end
+		return false
+	end
+
+	-- A download holds the browser until it is in (DL.Watch). Back cancels it,
+	-- but only when pressed twice -- one stray press at ninety percent should
+	-- not throw a pack away -- and Start takes the first press back. A failure
+	-- is put away with either key.
+	if state.dlWatch then
+		local dl = state.downloads[state.dlWatch]
+		if not dl then
+			state.dlWatch, state.dlCancelArmed = nil, nil
+			Refresh()
+		elseif firstPress and dl.status == "error" then
+			if button == "Start" or button == "Back" then
+				PlaySfx("cancel")
+				state.dlWatch, state.dlCancelArmed = nil, nil
+				Refresh()
+			end
+		elseif firstPress and dl.status == "active" and not dl.cancelling then
+			if button == "Back" then
+				if state.dlCancelArmed then
+					PlaySfx("cancel")
+					DL.CancelWatched()
+				else
+					PlaySfx("invalid")
+					state.dlCancelArmed = true
+					Refresh()
+				end
+			elseif button == "Start" and state.dlCancelArmed then
+				PlaySfx("start")
+				state.dlCancelArmed = nil
+				Refresh()
+			end
+		end
+		return false
+	end
 
 	if state.mode == "blocked" then
 		-- network access is not set up; this screen only explains the fix
@@ -697,6 +744,28 @@ local BrowserInput = function(event)
 		return false
 	end
 
+	-- The library dialog sits over the detail page, and while it is up an
+	-- answer to it is all a key can mean. Start takes the download wherever the
+	-- game will put it instead, and the answer holds for the rest of the session.
+	if state.mode == "detail" and state.libraryAsk then
+		local ask = state.libraryAsk
+		if button == "Start" and firstPress then
+			state.libraryAsk = nil
+			state.libraryOk = true
+			if ask.song then
+				DL.AskSong(ask.pack, ask.song)
+			else
+				DL.Ask(ask.pack)
+			end
+			Refresh()
+		elseif button == "Back" and firstPress then
+			PlaySfx("cancel")
+			state.libraryAsk = nil
+			Refresh()
+		end
+		return false
+	end
+
 	if state.mode == "detail" then
 		local pack = CurrentPack()
 		local det = pack and state.details[pack.id]
@@ -913,15 +982,7 @@ local BrowserInput = function(event)
 		elseif button == "Start" and firstPress then
 			if state.chooseIdx == 2 then
 				-- one song, into the singles pack for its sync
-				local ok, why = DL.StartSong(pack, song)
-				if ok then
-					PlaySfx("start")
-					Toast(song.title .. " - going to " .. Sync.SinglesFolder(pack))
-					if refs.heart then refs.heart:playcommand("SMOArmHeartbeat") end
-				else
-					PlaySfx("invalid")
-					Toast(tostring(why))
-				end
+				DL.AskSong(pack, song)
 				-- the difficulty this dialog was offering goes with it; only a
 				-- preview consumes one, and this was not a preview
 				Snd.pick = nil

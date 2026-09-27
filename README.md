@@ -49,6 +49,8 @@ itgmania-content-browser-installer [flags]
   -detect               print the best-guess install directory (for front-ends)
   -check                report whether the browser will work here, and exit
   -y                    don't prompt; use the first detected install
+  -songs-drive-writable ITG System Image: keep the songs drive writable while
+                        the game runs, so downloads go there (asked if not given)
   -uninstall            remove the module files
   -no-banner            don't draw the artwork banner
   -version              print version and exit
@@ -68,7 +70,9 @@ search, pack pages and banners come from stepmaniaonline.net; popularity
 from arrowcloud.dance; the doubles category from itgdb.net; update manifests
 and module archives from GitHub. Pack installs stream the zip to disk with
 the engine's own `downloadFile` and land it in `/Songs` with
-`FILEMAN:Unzip`. Pack deletion truncates every file to zero bytes -- the one
+`FILEMAN:Unzip` -- in the first song folder you listed that the game may
+write to, else its own (see [Where downloads land](#where-downloads-land)).
+Pack deletion truncates every file to zero bytes -- the one
 kind of remove the engine allows -- reclaiming the disk immediately; the
 emptied group leaves the music wheel on the next song reload, which the
 browser offers on the way out. In-game updates verify the archive's SHA-256
@@ -113,6 +117,16 @@ next install run: its login item, launcher line and binary are removed.
   GitHub hosts the in-game updater reads.
 * **Sweeps the old helper** if an earlier version installed one: its
   scheduled task or unit, its launcher line, and its binary.
+* **Says where downloads will land** -- the song folders you set up, in the
+  order the game tries them, and which one gets a new pack.
+* **On the ITG System Image, offers to keep the songs drive writable while the
+  game runs**, so downloads land on it (see below). Asked, never assumed;
+  `-songs-drive-writable` answers yes for scripts, and `-y` alone leaves the
+  image as it is.
+* **Leaves a note** in `Save/ITGmaniaContentBrowser/installer.txt`: its
+  version, and on the image what was chosen for the songs drive. An in-game
+  update brings the module and nothing else, so this is how the browser can
+  tell a machine that needs the installer run again.
 
 The preferences edit keeps every host already on your allowlist (GrooveStats
 keeps working), changes at most two lines — `HttpAllowHosts` and `HttpEnabled` —
@@ -133,6 +147,50 @@ So the privileged edit is done by this installer, which you run yourself. The
 module never asks for permission in-game and never changes the setting behind
 your back; if the setting is missing it shows a **Network Access Not Enabled**
 warning naming the exact problem and how to fix it.
+
+### Where downloads land
+
+Every song folder the game has is mounted at `/Songs` together, and for a pack
+folder that does not exist yet the engine gives it to the newest mount. It
+mounts `AdditionalFolders*` trees before `AdditionalSongFolders*` folders,
+each list in the order written, and never writes into one listed
+`...ReadOnly`. So a pack goes to the last writable song folder you listed,
+else the `Songs/` of the last writable tree, else the game's own `Songs`.
+(Checked by running the engine, not read off its source, whose own comment on
+this reads the other way round.)
+
+What the engine does not do is say so. A folder it may not write to -- listed
+read-only, or on a filesystem that refuses the write -- is passed over in
+silence, and the unzip reports success. So the installer prints where downloads
+will go, and in the game, when your song folder is listed read-only, the
+browser says where a pack will go instead and asks first.
+
+### The ITG System Image
+
+On dinsfire64's [ITG System Image](https://docs.google.com/document/d/1_lO2ddaYogve08u7CsjC6OojXy36ZfGgo7VCRVkLJhU/edit)
+the game runs as `dance`, from `/opt/itgmania`, with the profile and Simply
+Love on a root partition that is read-only while the game runs (and replaced
+by image updates), custom files on `/mnt/stepmania`, and the song library on
+its own partition, `/mnt/songs`. Every time the game starts, `~/start.sh`
+remounts `/mnt/songs` read-only and lists `/mnt/songs/Songs` under
+`AdditionalSongFoldersReadOnly`, with `/mnt/stepmania` as the one writable
+tree -- so packs downloaded in the game land in `/mnt/stepmania/Songs`, while
+the songs drive stays read-only, whatever its file permissions say.
+
+* **Install from System Mode** (Caps Lock on, then Alt+F4 to quit the game),
+  as `dance` -- no `sudo` needed. Anywhere else the root partition is
+  read-only, and the installer says so rather than half-installing.
+* **The songs drive.** Asked (or with `-songs-drive-writable`), the installer
+  adds one fenced block to `~/start.sh`, just before the line that starts the
+  game: remount `/mnt/songs` read-write with `sudo -n`, and only if that
+  worked, list `/mnt/songs/Songs` as writable instead of read-only. Downloads
+  then land on the songs drive from the next start. A power cut in the middle
+  of a download can then damage the pack being downloaded -- which is why the
+  image keeps the drive read-only, and why this is a question. A timestamped
+  copy of `start.sh` is kept beside it; `-uninstall` takes the block out again.
+* **After an image update, or updating Simply Love with Win+S**, run the
+  installer again: both replace what it put on the root partition, the module
+  and the block alike.
 
 ## If something goes wrong
 
@@ -160,6 +218,12 @@ Most problems are one of these:
 * **"Allowlist: NOT SET"** — re-run the installer **with ITGmania closed**. The
   game rewrites `Preferences.ini` from memory when it exits, so an edit made
   while it is running is thrown away.
+* **Packs go to `/mnt/stepmania/Songs`, not the songs drive (ITG System
+  Image)** — the image keeps `/mnt/songs` read-only while the game runs; see
+  [The ITG System Image](#the-itg-system-image). `-check` prints
+  `Songs drive:` and `Downloads to:` lines saying which way this machine is
+  set. Packs already downloaded stay where they are; move them to
+  `/mnt/songs/Songs` from System Mode if you want them there.
 * **Find Content disappeared after updating ITGmania itself (Linux)** — re-run
   this installer. ITGmania's Linux `setup.sh` preserves the theme's modules
   across an upgrade with `cp -r -n "<old>/Modules" "<new>/Modules"`, and

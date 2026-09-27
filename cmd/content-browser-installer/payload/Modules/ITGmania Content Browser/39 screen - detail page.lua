@@ -403,8 +403,10 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 				if dl.status == "active" then
 					local pct = 0
 					if dl.total > 0 then pct = math.floor(dl.cur / dl.total * 100) end
-					text = "downloading  " .. pct .. "%   ("
-						.. FormatBytes(dl.cur) .. " / " .. FormatBytes(dl.total) .. ")"
+					-- 0 bytes, and an unknown total, each print as nothing
+					local got = dl.cur > 0 and FormatBytes(dl.cur) or "0 MB"
+					text = "downloading  " .. pct .. "%   (" .. got
+						.. (dl.total > 0 and (" / " .. FormatBytes(dl.total)) or " so far") .. ")"
 				elseif dl.status == "installing" then
 					text = "installing..."
 				elseif dl.status == "done" then
