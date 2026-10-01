@@ -124,6 +124,7 @@ local state = {
 	textEntryOpen = false,
 	pendingSearch = nil,
 	reloadForUs   = false,   -- we sent the player to ScreenReloadSongsSSM
+	reloadAt      = nil,     -- when the reload offer last opened (Back waits a moment)
 	blockedReason = nil,     -- why network access is unavailable, if it is
 
 	-- pad/keyboard filtering (pack type metadata from /api/packs)
@@ -140,6 +141,9 @@ local state = {
 	keyboardPacks = nil,     -- rows built from the CSV for keyboard mode, id desc
 	pageOffsets   = {},      -- uiPage -> server row offset (pad mode paging)
 	pageCache     = {},      -- "filter|search|page" -> rows already fetched for it
+	prefetch      = nil,     -- the next window, being fetched in the background
+	awaitPage     = nil,     -- the page the player reached before that fetch landed
+	awaitKeepCursor = nil,   -- ...and whether its cursor stays where it was
 
 	-- arrowcloud.dance's popularity ranking, which gates the featured grid
 	arrowcloud    = {

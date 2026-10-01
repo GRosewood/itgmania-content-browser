@@ -157,3 +157,65 @@ func TestExplicitThemePathBeatsAnAmbiguousName(t *testing.T) {
 		t.Error("accepted a theme directory that does not exist")
 	}
 }
+
+// A non-portable install after an in-game update. On Windows the game mounts
+// its own folder read-only, so the update could only write into the profile,
+// and it left a "Simply Love" there holding nothing but Modules. The engine
+// reads that and the install's copy as one theme, file by file; judged alone,
+// the profile copy was "not a Simply Love theme" and nothing could install.
+func TestPartialProfileCopyIsJudgedWithTheCopyUnderIt(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		profileOverlay string // the profile copy's own loader, "" for none
+		wantOK         bool
+	}{
+		{"only Modules in the profile copy", "", true},
+		// a loader in the profile copy is the one the game reads, so it is
+		// the one judged, whatever the copy under it has
+		{"profile copy replaces the loader with one that loads nothing", "local t = Def.ActorFrame{}\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			themes := filepath.Join(root, "Themes")
+			save := filepath.Join(home, "Save")
+			if err := os.MkdirAll(save, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeTheme(t, themes, "Simply Love", slOverlay, slMetrics)
+			profileTheme := filepath.Join(home, "Themes", "Simply Love")
+			writeTheme(t, filepath.Join(home, "Themes"), "Simply Love", tc.profileOverlay, "")
+			mods := filepath.Join(profileTheme, "Modules")
+			if err := os.MkdirAll(mods, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(mods, "ITGmania Content Browser.lua"), []byte("-- module\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			inst := Install{Root: root, ThemesDir: themes, SaveDir: save}
+			setPrefs(t, inst, "[Options]\nTheme=Simply Love\n")
+
+			got, _, err := PickTheme(Themes(inst), "", CurrentTheme(inst.SaveDir))
+			if !tc.wantOK {
+				if err == nil {
+					t.Fatalf("chose %s, but the loader the game reads there loads nothing", got.Path)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("PickTheme: %v", err)
+			}
+			if got.Path != profileTheme {
+				t.Errorf("installing into %s, want the profile copy %s, which the game reads first", got.Path, profileTheme)
+			}
+			if !got.Installed {
+				t.Error("the module already in the profile copy went unseen")
+			}
+			if len(got.AlsoIn) != 1 || got.AlsoIn[0] != filepath.Join(themes, "Simply Love") {
+				t.Errorf("AlsoIn = %v, want the install's own copy", got.AlsoIn)
+			}
+			if dir := inst.ModuleThemeDir(); dir != profileTheme {
+				t.Errorf("an update would write to %s, want %s", dir, profileTheme)
+			}
+		})
+	}
+}

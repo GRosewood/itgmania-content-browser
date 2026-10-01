@@ -1,10 +1,10 @@
 {
-  "version": "0.9.1",
-  "notes": "Nothing changes in the game with this one. It fixes the Windows installer: pointed at ITGmania's data folder instead of the game, it failed with a message about Preferences.ini, and a fresh install was told network access had not been enabled when it had. Setup now says what actually went wrong, and finds ITGmania in Documents too.",
+  "version": "0.9.2",
+  "notes": "The pad list scrolls much faster: pages now arrive several at a time and the next ones are fetched before you reach them, so most page turns are instant, and the banners on screen load first. Flipping through pages quickly no longer slows the list down. Leaving the browser after installing something, a quick extra press of Back can no longer skip the offer to reload songs, and leaving without reloading now says so on the title menu.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.9.1/itgmania-content-browser-module-0.9.1.zip",
-    "sha256": "2af7569bf72862a04f4ba60c05bb15e3698ec574c859af9017ac41a2a2164b62",
-    "bytes": 248939
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.9.2/itgmania-content-browser-module-0.9.2.zip",
+    "sha256": "2a4ec8e3dbfd8a8cf437165c738ea3718d08ded4c77d59407e8d29051adc3ee5",
+    "bytes": 252028
   },
   "minHelper": "0.5"
 }

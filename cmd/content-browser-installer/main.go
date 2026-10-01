@@ -195,7 +195,7 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 				// copy nobody is running.
 				fmt.Printf("      %s\n", t.Path)
 				for _, other := range t.AlsoIn {
-					fmt.Printf("      also: %s (not loaded)\n", other)
+					fmt.Printf("      also: %s (the same theme: the game reads from here what the copy above lacks)\n", other)
 				}
 			}
 			fmt.Println()
@@ -263,9 +263,10 @@ func run(target string, assumeYes, uninstall, listOnly, noBanner bool,
 	// nothing else on this screen looks any different.
 	fmt.Printf("  Theme:    %s\n", theme.Path)
 	for _, other := range theme.AlsoIn {
-		fmt.Printf("            (a theme called %q is also in %s; the game loads\n", theme.Name, other)
-		fmt.Printf("             the one above. If it is drawing that one instead, re-run with\n")
-		fmt.Printf("             -theme followed by that full path)\n")
+		fmt.Printf("            (a theme called %q is also in %s; the game reads the\n", theme.Name, other)
+		fmt.Printf("             two as one theme, each file from the copy above when it has it,\n")
+		fmt.Printf("             so the module goes above. To put it in that copy instead, re-run\n")
+		fmt.Printf("             with -theme followed by that full path)\n")
 	}
 	if !theme.Current {
 		// Installing into a theme that is not switched on is legitimate -- people
@@ -748,7 +749,7 @@ func listThemeTable(themes []installer.Theme) {
 		fmt.Printf("    %-40s %s\n", t.Name, describeTheme(t))
 		fmt.Printf("      %s\n", t.Path)
 		for _, other := range t.AlsoIn {
-			fmt.Printf("      also: %s (not loaded)\n", other)
+			fmt.Printf("      also: %s (the same theme: the game reads from here what the copy above lacks)\n", other)
 		}
 	}
 	fmt.Println()

@@ -187,25 +187,63 @@ func ThemeRoots(inst Install) []string {
 	return out
 }
 
-// inspectTheme judges one theme directory on what it can do.
-func inspectTheme(dir, current string) Theme {
+// inspectTheme judges a theme on what the game will read for it. dir is the
+// copy that comes first -- the one an install writes into -- and others are
+// same-named copies in the roots after it.
+//
+// The engine does not choose one copy of a theme. Every root is mounted over
+// /Themes, and each file is read from the first copy holding it, so a copy
+// with only some of the files is not a broken theme but the top layer of one.
+// On a non-portable Windows install that layer is routine: the game mounts
+// its own folder read-only and can write only into the profile, so an in-game
+// update of this module lands in %APPDATA%\ITGmania\Themes\Simply Love\Modules
+// and leaves a "Simply Love" there holding nothing else. Judged alone, that
+// copy had no loader and no title menu; the installer called the theme the
+// game was drawing "not a Simply Love theme", wrote the complete copy under
+// it off as not loaded, and refused to install at all.
+func inspectTheme(dir, current string, others ...string) Theme {
+	copies := append([]string{dir}, others...)
+	installed := false
+	for _, c := range copies {
+		if themeHasModule(c) {
+			installed = true
+		}
+	}
 	name := filepath.Base(dir)
 	return Theme{
 		Name:      name,
 		Path:      dir,
-		Modules:   themeLoadsModules(dir),
-		TitleMenu: themeHasTitleChoices(dir),
+		Modules:   themeLoadsModules(firstHolding(copies, filepath.Join("BGAnimations", "ScreenSystemLayer overlay.lua"))),
+		TitleMenu: themeHasTitleChoices(firstHolding(copies, "metrics.ini")),
 		Current:   strings.EqualFold(name, current),
-		Installed: themeHasModule(dir),
+		Installed: installed,
+		AlsoIn:    others,
 	}
+}
+
+// firstHolding is the first copy holding rel, which is the copy the engine
+// reads it from, or the first copy when none does.
+func firstHolding(copies []string, rel string) string {
+	for _, dir := range copies {
+		if isFile(filepath.Join(dir, rel)) {
+			return dir
+		}
+	}
+	return copies[0]
 }
 
 // Themes lists the install's theme directories, best candidate first.
 func Themes(inst Install) []Theme {
 	current := CurrentTheme(inst.SaveDir)
 
-	var found []Theme
-	at := map[string]int{}
+	// Every copy of each name first, then each theme judged across its copies
+	// (see inspectTheme), because the game reads them together.
+	type copiesOf struct {
+		first  string
+		others []string
+	}
+	var order []string
+	byName := map[string]*copiesOf{}
 	for _, root := range ThemeRoots(inst) {
 		entries, err := os.ReadDir(root)
 		if err != nil {
@@ -223,18 +261,24 @@ func Themes(inst Install) []Theme {
 			}
 			dir := filepath.Join(root, name)
 			// The profile is listed first and wins: the engine mounts it over
-			// the install, so that is the copy the game actually loads. A
-			// later root holding the same name is a second copy, not a second
-			// theme -- kept against the entry rather than dropped, because a
-			// player who cannot see it has no way to know the module went
-			// somewhere they are not looking.
-			if i, dup := at[strings.ToLower(name)]; dup {
-				found[i].AlsoIn = append(found[i].AlsoIn, dir)
+			// the install, so its files are the ones the game reads first. A
+			// later root holding the same name is another layer of the same
+			// theme, not a second theme -- kept against the entry rather than
+			// dropped, because a player who cannot see it has no way to know
+			// the module went somewhere they are not looking.
+			key := strings.ToLower(name)
+			if c, dup := byName[key]; dup {
+				c.others = append(c.others, dir)
 				continue
 			}
-			at[strings.ToLower(name)] = len(found)
-			found = append(found, inspectTheme(dir, current))
+			byName[key] = &copiesOf{first: dir}
+			order = append(order, key)
 		}
+	}
+	var found []Theme
+	for _, key := range order {
+		c := byName[key]
+		found = append(found, inspectTheme(c.first, current, c.others...))
 	}
 
 	// Best first: one it would run under, that the player is using, that it is

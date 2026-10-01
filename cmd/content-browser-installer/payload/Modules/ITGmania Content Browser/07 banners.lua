@@ -88,9 +88,23 @@ BannerPump = function()
 	end
 end
 
-local function RequestBanner(url)
+-- soon puts the banner at the front of the queue, moving it there if it is
+-- already waiting: art wanted on screen now goes ahead of art asked for ahead
+-- of time, or for a page the player has already scrolled past.
+local function RequestBanner(url, soon)
 	if not url or state.banners[url] or state.bannerBusy[url] then return end
-	if state.bannerQueued[url] then return end
+	if state.bannerQueued[url] then
+		if soon then
+			for i, queued in ipairs(state.bannerQueue) do
+				if queued == url then
+					table.remove(state.bannerQueue, i)
+					break
+				end
+			end
+			table.insert(state.bannerQueue, 1, url)
+		end
+		return
+	end
 	-- negative cache: don't hammer the server re-requesting failed banners
 	-- on every refresh
 	local failedAt = state.bannerFailed[url]
@@ -98,7 +112,11 @@ local function RequestBanner(url)
 	if not UrlAllowed() then return end
 
 	state.bannerQueued[url] = true
-	state.bannerQueue[#state.bannerQueue+1] = url
+	if soon then
+		table.insert(state.bannerQueue, 1, url)
+	else
+		state.bannerQueue[#state.bannerQueue+1] = url
+	end
 	BannerPump()
 end
 
@@ -111,9 +129,12 @@ local function BannerUrlFor(pack)
 	return det and det.banner
 end
 
+-- The page on screen, ahead of everything else queued. Walked from the bottom
+-- up, each to the front, so the page's own order survives: the top row's art
+-- starts first.
 local function PrefetchBanners()
-	for pack in ivalues(state.packs) do
-		RequestBanner(BannerUrlFor(pack))
+	for i = #state.packs, 1, -1 do
+		RequestBanner(BannerUrlFor(state.packs[i]), true)
 	end
 end
 

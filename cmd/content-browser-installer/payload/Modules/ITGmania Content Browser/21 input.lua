@@ -54,6 +54,10 @@ local YearList                   = CB.YearList
 local refs                       = CB.refs
 local state                      = CB.state
 
+-- How long the song-reload offer ignores Back after it appears (see the
+-- reload dialog's own handling, at the end of BrowserInput).
+local RELOAD_BACK_GUARD = 0.6
+
 
 -- Open a pack's detail page.
 --
@@ -237,6 +241,7 @@ local BrowserInput = function(event)
 			if state.needsReload and not DownloadsActive() then
 				state.reloadIdx = 1
 				state.mode = "reload"
+				state.reloadAt = GetTimeSinceStart()
 				Refresh()
 			else
 				if DownloadsActive() then
@@ -1107,6 +1112,15 @@ local BrowserInput = function(event)
 	end
 
 	if state.mode == "reload" then
+		-- Leaving without the reload, said on the way out: whatever was
+		-- installed is not on the wheel until a reload, and leaving the browser
+		-- again is where the next offer comes from.
+		local function LeaveUnreloaded()
+			PlaySfx("cancel")
+			SCREENMAN:SystemMessage("Songs not reloaded - the new content shows up after a"
+				.. " reload, which Find Content offers again when you leave it")
+			LeaveBrowser("ScreenTitleMenu")
+		end
 		if (button == "MenuLeft" or button == "Left"
 		    or button == "MenuRight" or button == "Right") and firstPress then
 			local want = (button == "MenuLeft" or button == "Left") and 1 or 2
@@ -1123,8 +1137,7 @@ local BrowserInput = function(event)
 			if state.reloadIdx == 2 then
 				-- "Not yet" is the same as backing out, and saying so with the
 				-- same key as "go" is the point of making it a choice
-				PlaySfx("cancel")
-				LeaveBrowser("ScreenTitleMenu")
+				LeaveUnreloaded()
 				return false
 			end
 			PlaySfx("start")
@@ -1133,8 +1146,15 @@ local BrowserInput = function(event)
 			state.reloadForUs = true
 			LeaveBrowser("ScreenReloadSongsSSM")
 		elseif button == "Back" and firstPress then
-			PlaySfx("cancel")
-			LeaveBrowser("ScreenTitleMenu")
+			-- Back is how this was reached -- Back climbs out a rung at a time,
+			-- and from the tab row it opens this -- so one press too many used
+			-- to open it and answer it in the same breath, and the player left
+			-- without ever seeing the question. A press this soon after it
+			-- appeared is that press, not an answer.
+			if GetTimeSinceStart() - (state.reloadAt or 0) < RELOAD_BACK_GUARD then
+				return false
+			end
+			LeaveUnreloaded()
 		end
 		return false
 	end

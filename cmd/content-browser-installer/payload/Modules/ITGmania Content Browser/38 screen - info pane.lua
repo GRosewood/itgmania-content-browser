@@ -91,11 +91,32 @@ function CB.Screen.InfoPane()
 			local pack = CurrentPack()
 			self:settext(pack and pack.name or "")
 			self:diffuse(1, 1, 1, 1)
+		end,
+	}
 
-			-- lazy-load details for the highlighted pack while browsing
-			-- (only while the browser is actually open, in the list view, and
-			-- settled on it rather than passing over its tab)
-			if pack and state.open and state.settled and InPackList() then
+	-- Details for the highlighted pack, lazily, once the highlight has rested
+	-- on it (and only while the browser is open, in the list, and settled on
+	-- it rather than passing over its tab).
+	--
+	-- Asking the moment a pack was highlighted asked for the first pack of
+	-- every page scrolled past, and the engine runs one request at a time:
+	-- flicking through ten pages put ten pack pages in the queue ahead of the
+	-- page the player stopped on. The timer starts again only when the
+	-- highlight moves to another pack, so refreshes for anything else cannot
+	-- hold the request back.
+	local DETAIL_SETTLE = 0.25
+	pane[#pane+1] = Def.Actor{
+		SMORefreshMessageCommand = function(self)
+			local pack = CurrentPack()
+			local want = (pack and state.open and state.settled and InPackList()) and pack.id or nil
+			if want == self.want then return end
+			self.want = want
+			self:stoptweening()
+			if want then self:sleep(DETAIL_SETTLE):queuecommand("SMOAskDetail") end
+		end,
+		SMOAskDetailCommand = function(self)
+			local pack = CurrentPack()
+			if pack and pack.id == self.want and state.open and state.settled and InPackList() then
 				FetchDetail(pack)
 			end
 		end,
