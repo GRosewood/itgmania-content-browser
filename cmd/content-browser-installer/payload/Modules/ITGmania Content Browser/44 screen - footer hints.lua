@@ -11,6 +11,7 @@ local CB = ...
 -- set by a file that has already run; nothing here reaches forwards.
 local InBrowsingMode = CB.InBrowsingMode
 local InLevelView    = CB.InLevelView
+local InstalledPack  = CB.InstalledPack
 local InPackList     = CB.InPackList
 local CurrentPack    = CB.CurrentPack
 local LO             = CB.LO
@@ -77,7 +78,12 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 				if state.zone == "tabs" then
 					self:settext("&MENULEFT;&MENURIGHT; switch view    &MENUDOWN; your packs    &BACK; exit")
 				else
-					self:settext("&MENUUP;&MENUDOWN; packs   &MENULEFT;&MENURIGHT; page   &START; fix sync   &SELECT; remove   &BACK; exit")
+					-- Start offers the update when SMO has a newer version
+					local pack = InstalledPack()
+					local p = pack and state.patches[pack.name]
+					local start = (p and p.status == "outdated") and "update" or "fix sync"
+					self:settext("&MENUUP;&MENUDOWN; packs   &MENULEFT;&MENURIGHT; page   &START; "
+						.. start .. "   &SELECT; remove   &BACK; exit")
 				end
 			elseif state.mode == "detail" and state.libraryAsk then
 				-- the library dialog is up over the page; it prints its own keys
@@ -96,6 +102,7 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 				end
 			elseif state.mode == "sync" or state.mode == "blocked" or state.mode == "confirm"
 			       or state.mode == "reload" or state.mode == "removeconfirm"
+			       or state.mode == "patchconfirm"
 			       or state.mode == "update" then
 				-- a dialog is up; it prints its own hint, so don't double it here
 				self:settext("")

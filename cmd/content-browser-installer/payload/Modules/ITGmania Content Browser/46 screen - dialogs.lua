@@ -16,6 +16,8 @@ local DL            = CB.DL
 local FormatBytes   = CB.FormatBytes
 local InstalledPack = CB.InstalledPack
 local LO            = CB.LO
+local PATCH         = CB.PATCH
+local ScrollBar     = CB.ScrollBar
 local Snd           = CB.Snd
 local Sync          = CB.Sync
 local UP            = CB.UP
@@ -27,9 +29,29 @@ function CB.Screen.Dialogs(af, ui)
 
 	-- bodyFn returns title, body, hint.  The hint is the only place the
 	-- confirm/cancel keys are printed for a dialog; the footer stays quiet.
-	local function DialogFrame(name, visibleFn, bodyFn, height, choicesFn, choiceIcons, radio, slots)
+	--
+	-- opts, for the one dialog that needs more: width, and below = { height,
+	-- actor } -- something of the dialog's own that sits under the body, laid
+	-- out from y = 0 down, with the choice row under it in turn.
+	local BELOW_GAP = 8
+	local function DialogFrame(name, visibleFn, bodyFn, height, choicesFn, choiceIcons, radio, slots, opts)
 		local h = height or LO.DIALOG_H
-		local bodyText   -- captured so the choice row can sit under it
+		local w = opts and opts.width or LO.DIALOG_W
+		local below = opts and opts.below
+		local belowFrame
+		-- The choice row sits a line under where the body stops, or at the
+		-- bottom of the dialog if the body runs long enough to reach it. The
+		-- body places it: only the body can measure the body, and a row that
+		-- measured it from its own handler could get there before the new
+		-- text did, and sit under the last dialog's words.
+		local rows = {}
+		local function ChoiceY(body)
+			local top = -h/2 + 46
+			local used = body:GetZoomedHeight()
+			if below then used = used + BELOW_GAP + below.height end
+			if used <= 0 then return h/2 - 48 end
+			return math.min(top + used + 20, h/2 - 48)
+		end
 		local dialog = Def.ActorFrame{
 			Name = name,
 			InitCommand = function(self) self:xy(LO.W/2, LO.H/2):visible(false) end,
@@ -37,8 +59,8 @@ function CB.Screen.Dialogs(af, ui)
 				self:visible(state.open and not state.textEntryOpen and visibleFn())
 			end,
 
-			Def.Quad{ InitCommand=function(self) self:setsize(LO.DIALOG_W + 4, h + 4):diffuse(1, 1, 1, 1) end },
-			Def.Quad{ InitCommand=function(self) self:setsize(LO.DIALOG_W, h):diffuse(0, 0, 0, 1) end },
+			Def.Quad{ InitCommand=function(self) self:setsize(w + 4, h + 4):diffuse(1, 1, 1, 1) end },
+			Def.Quad{ InitCommand=function(self) self:setsize(w, h):diffuse(0, 0, 0, 1) end },
 
 			Def.BitmapText{
 				Font = "Common Bold",
@@ -55,7 +77,7 @@ function CB.Screen.Dialogs(af, ui)
 			-- rule under the title
 			Def.Quad{
 				InitCommand = function(self)
-					self:y(-h/2 + 38):setsize(LO.DIALOG_W - 48, 1)
+					self:y(-h/2 + 38):setsize(w - 48, 1)
 				end,
 				SMORefreshMessageCommand = function(self)
 					self:diffuse(AccentColor()):diffusealpha(0.45)
@@ -65,13 +87,17 @@ function CB.Screen.Dialogs(af, ui)
 			Def.BitmapText{
 				Font = "Common Normal",
 				InitCommand = function(self)
-					bodyText = self
 					self:y(-h/2 + 46):vertalign(top):zoom(0.58):diffuse(0.9, 0.9, 0.9, 1)
-					self:wrapwidthpixels((LO.DIALOG_W - 40)/0.58)
+					self:wrapwidthpixels((w - 40)/0.58)
 				end,
 				SMORefreshMessageCommand = function(self)
 					local _, body = bodyFn()
 					self:settext(body or "")
+					local y = ChoiceY(self)
+					for row in ivalues(rows) do row:y(y) end
+					if belowFrame then
+						belowFrame:y(-h/2 + 46 + self:GetZoomedHeight() + BELOW_GAP)
+					end
 				end,
 			},
 
@@ -87,7 +113,7 @@ function CB.Screen.Dialogs(af, ui)
 				Font = "Common Normal",
 				InitCommand = function(self)
 					self:y(h/2 - 18):zoom(0.6):diffuse(0.88, 0.88, 0.88, 1)
-					self:maxwidth((LO.DIALOG_W - 30)/0.6)
+					self:maxwidth((w - 30)/0.6)
 				end,
 				SMORefreshMessageCommand = function(self)
 					local _, _, hint = bodyFn()
@@ -96,18 +122,16 @@ function CB.Screen.Dialogs(af, ui)
 			},
 		}
 
+		if below then
+			dialog[#dialog+1] = Def.ActorFrame{
+				InitCommand = function(self) belowFrame = self end,
+				below.actor,
+			}
+		end
+
 		-- A dialog that asks which of two things to do rather than whether to
 		-- do one thing. The options sit above the hint line; a dialog without
 		-- them is unchanged.
-		-- a line under where the body stops, or the bottom of the dialog if the
-		-- body runs long enough to reach it
-		local function ChoiceY()
-			local top = -h/2 + 46
-			local used = bodyText and bodyText:GetZoomedHeight() or 0
-			if used <= 0 then return h/2 - 48 end
-			return math.min(top + used + 20, h/2 - 48)
-		end
-
 		if choicesFn then
 			-- An icon shifts its label sideways to keep the pair centred in the
 			-- box, and the icon then hangs off the label's measured width --
@@ -117,7 +141,7 @@ function CB.Screen.Dialogs(af, ui)
 			local ICON_W, ICON_GAP = 13, 5
 			local COUNT = slots or 2
 			local BOX_GAP = 8
-			local BOX_W = math.floor((LO.DIALOG_W - 20 - (COUNT-1)*BOX_GAP) / COUNT)
+			local BOX_W = math.floor((w - 20 - (COUNT-1)*BOX_GAP) / COUNT)
 			local ROW_W = COUNT*BOX_W + (COUNT-1)*BOX_GAP
 			local DOT_X, TEXT_X = -BOX_W/2 + 14, -BOX_W/2 + 28
 
@@ -155,10 +179,11 @@ function CB.Screen.Dialogs(af, ui)
 				-- IconOn on purpose: a closure compiled above a local binds
 				-- that name to a global instead, and a global nobody sets is nil.
 				local slot = Def.ActorFrame{
-					InitCommand = function(self) self:y(h/2 - 48) end,
+					InitCommand = function(self)
+						self:y(h/2 - 48)
+						rows[#rows+1] = self   -- the body moves it (ChoiceY)
+					end,
 					SMORefreshMessageCommand = function(self)
-						self:y(ChoiceY())
-
 						local label = self:GetChild("Label")
 						local icon  = self:GetChild("Icon")
 						local list, idx = choicesFn()
@@ -525,6 +550,112 @@ function CB.Screen.Dialogs(af, ui)
 			return { "Reload songs", "Not yet" }, state.reloadIdx
 		end, { "installed.png", nil }, nil, 2)
 
+	-- An installed pack SMO has a newer version of (PATCH, in the installed
+	-- part): what the update brings, file by file, and the sync settings
+	-- Start used to open, one choice along.
+	do
+		local PATCH_W, FILE_H = 520, 14
+		local ROWS_SHOWN = PATCH.FILE_ROWS
+		local LIST_H = ROWS_SHOWN * FILE_H + 6
+		local BOX_W = PATCH_W - 32
+		local WHY = {
+			charts  = { "new charts", 0.97, 0.78, 0.30 },
+			changed = { "changed",    0.97, 0.78, 0.30 },
+			song    = { "new song",   0.40, 0.85, 0.45 },
+			new     = { "new",        0.40, 0.85, 0.45 },
+		}
+
+		local function Outdated()
+			local pack = state.patchPack
+			local p = pack and state.patches[pack.name]
+			if pack and p and p.status == "outdated" then return pack, p end
+		end
+		local function Item(r)
+			local _, p = Outdated()
+			return p and p.items and p.items[(state.patchScroll or 0) + r]
+		end
+
+		-- A name long enough to wrap would push the list down into the
+		-- buttons, so a very long one is cut -- between characters, never
+		-- inside one.
+		local NAME_MAX = 60
+		local function ShortName(name)
+			if #name <= NAME_MAX then return name end
+			local cut = NAME_MAX
+			while cut > 1 and (name:byte(cut + 1) or 0) >= 0x80 and (name:byte(cut + 1) or 0) < 0xC0 do
+				cut = cut - 1
+			end
+			return name:sub(1, cut) .. "..."
+		end
+
+		-- The files, a row each: where in the pack, and why it is coming.
+		-- Replacing is amber and adding is green, the colours the rows of the
+		-- installed list already use for "update" and "up to date".
+		local list = Def.ActorFrame{
+			Def.Quad{
+				InitCommand = function(self)
+					self:vertalign(top):setsize(BOX_W, LIST_H):diffuse(1, 1, 1, 0.06)
+				end,
+			},
+		}
+		for r = 1, ROWS_SHOWN do
+			local y = 3 + (r - 1) * FILE_H + FILE_H/2
+			list[#list+1] = Def.BitmapText{
+				Font = "Common Normal",
+				InitCommand = function(self)
+					self:horizalign(left):xy(-BOX_W/2 + 8, y):zoom(0.5):diffuse(0.9, 0.9, 0.9, 1)
+					self:maxwidth((BOX_W - 96)/0.5)
+				end,
+				SMORefreshMessageCommand = function(self)
+					local item = Item(r)
+					self:visible(item ~= nil)
+					if item then self:settext(item.rel) end
+				end,
+			}
+			list[#list+1] = Def.BitmapText{
+				Font = "Common Normal",
+				InitCommand = function(self)
+					self:horizalign(right):xy(BOX_W/2 - 14, y):zoom(0.5)
+				end,
+				SMORefreshMessageCommand = function(self)
+					local item = Item(r)
+					local why = item and WHY[item.why]
+					self:visible(why ~= nil)
+					if why then self:settext(why[1]):diffuse(why[2], why[3], why[4], 1) end
+				end,
+			}
+		end
+		list[#list+1] = ScrollBar(BOX_W/2 - 8, 3, ROWS_SHOWN * FILE_H, false, function()
+			local _, p = Outdated()
+			if not (p and p.items) then return nil end
+			return #p.items, ROWS_SHOWN, state.patchScroll or 0
+		end)
+
+		af[#af+1] = DialogFrame("PatchDialog",
+			function() return state.mode == "patchconfirm" end,
+			function()
+				local pack, p = Outdated()
+				if not pack then return "", "", "" end
+				local files = #p.want .. (#p.want == 1 and " file" or " files")
+				if p.bytes > 0 then files = files .. ", " .. FormatBytes(p.bytes) end
+				local body = ShortName(pack.name) .. "\n"
+					.. "SMO has " .. PATCH.Words(p) .. ": " .. files .. "."
+					.. " Your sync and anything you added stay as they are."
+				local hint = "&MENULEFT;&MENURIGHT; choose    &START; go    &BACK; cancel"
+				local count = p.items and #p.items or 0
+				if count > ROWS_SHOWN then
+					local first = (state.patchScroll or 0) + 1
+					hint = "&MENUUP;&MENUDOWN; " .. first .. "-" .. math.min(count, first + ROWS_SHOWN - 1)
+						.. " of " .. count .. "    " .. hint
+				end
+				return "Update Available", body, hint
+			end, 300,
+			function()
+				return { "Update", "Sync settings" }, state.patchIdx
+			end, { "download.png", nil }, nil, 2,
+			{ width = PATCH_W, below = { height = LIST_H, actor = list } })
+	end
+
 	-- The sync screen. It is the explainer for the whole subject, and on an
 	-- installed pack with no Pack.ini it is also where one gets written.
 	af[#af+1] = DialogFrame("SyncDialog",
@@ -612,7 +743,8 @@ function CB.Screen.Dialogs(af, ui)
 				return "Download Failed", name .. "\n\n" .. tostring(dl.msg or "something went wrong"),
 					"&START;&BACK; close"
 			end
-			local title = dl.single and "Getting a Song" or "Downloading"
+			local title = dl.patch and "Updating"
+				or (dl.single and "Getting a Song" or "Downloading")
 			if dl.status == "installing" then
 				return title, name .. "\n\nUnpacking...", ""
 			end

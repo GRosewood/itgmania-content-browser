@@ -38,6 +38,7 @@ local LO                         = CB.LO
 local LEVEL                      = CB.LEVEL
 local LeaveBrowser               = CB.LeaveBrowser
 local OpenSearchPrompt           = CB.OpenSearchPrompt
+local PATCH                      = CB.PATCH
 local PlaySfx                    = CB.PlaySfx
 local ROWS                       = CB.ROWS
 local ReclaimInputAfterTextEntry = CB.ReclaimInputAfterTextEntry
@@ -440,8 +441,20 @@ local BrowserInput = function(event)
 				end
 			elseif button == "Start" and firstPress then
 				PlaySfx("start")
+				local pack = InstalledPack()
+				local p = pack and state.patches[pack.name]
+				if p and p.status == "outdated" then
+					-- SMO has a newer version: offer it, with the sync settings
+					-- this key always opened one choice along
+					state.patchPack = pack
+					state.patchIdx = 1
+					state.patchScroll = 0
+					state.mode = "patchconfirm"
+					Refresh()
+					return false
+				end
 				state.syncFrom = state.mode
-				state.syncPack = InstalledPack()
+				state.syncPack = pack
 				state.syncChoice = Sync.Suggest(state.syncPack)
 				state.syncNote = nil
 				state.mode = "sync"
@@ -890,6 +903,61 @@ local BrowserInput = function(event)
 			state.mode = state.returnMode or "list"
 			state.returnMode = nil
 			state.selected = nil
+			Refresh()
+		end
+		return false
+	end
+
+	-- The update dialog over the installed view: update, or the sync settings.
+	if state.mode == "patchconfirm" then
+		if button == "MenuUp" or button == "Up" or button == "MenuDown" or button == "Down" then
+			-- the list of files, a line at a time; a held key repeats
+			local pack = state.patchPack
+			local p = pack and state.patches[pack.name]
+			local most = math.max(0, (p and p.items and #p.items or 0) - PATCH.FILE_ROWS)
+			local step = (button == "MenuUp" or button == "Up") and -1 or 1
+			local to = Clamp((state.patchScroll or 0) + step, 0, most)
+			if to ~= state.patchScroll then
+				state.patchScroll = to
+				PlaySfx("change")
+				Refresh()
+			elseif firstPress then
+				PlaySfx("invalid")
+			end
+		elseif (button == "MenuLeft" or button == "Left"
+		    or button == "MenuRight" or button == "Right") and firstPress then
+			local want = (button == "MenuLeft" or button == "Left") and 1 or 2
+			if want ~= state.patchIdx then
+				state.patchIdx = want
+				PlaySfx("change")
+			else
+				PlaySfx("invalid")
+			end
+			Refresh()
+		elseif button == "Start" and firstPress then
+			local pack = state.patchPack
+			state.mode = "installed"
+			if state.patchIdx == 2 then
+				PlaySfx("start")
+				state.syncFrom = "installed"
+				state.syncPack = pack
+				state.syncChoice = Sync.Suggest(pack)
+				state.syncNote = nil
+				state.mode = "sync"
+			else
+				local ok, key = DL.Patch(pack, pack and state.patches[pack.name])
+				if ok then
+					PlaySfx("start")
+					DL.Watch(key)
+				else
+					PlaySfx("invalid")
+					Toast(tostring(key))
+				end
+			end
+			Refresh()
+		elseif button == "Back" and firstPress then
+			PlaySfx("cancel")
+			state.mode = "installed"
 			Refresh()
 		end
 		return false

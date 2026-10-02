@@ -187,6 +187,30 @@ download and install packs without ever leaving the game.
   will write a `Pack.ini` for a pack that has none. Packs downloaded through
   the browser also show the day they arrived. Packs can be deleted here without
   leaving the game (see below).
+- **Pack updates** — when a pack's author fixes charts and stepmaniaonline.net
+  gets a new zip, the copy you downloaded earlier is out of date. The Installed
+  tab checks each pack it shows against SMO's, song by song. Charts are
+  compared by their GrooveStats hashes, the ones the game and GrooveStats
+  already use: the steps and the BPMs, nothing else. So a resync — SMO moving
+  every offset by the 9ms ITG bias and rewriting the files around it — is not
+  an update, and neither is a fixed credit or title. (Stops, delays and warps
+  are outside the hash too.) The small text files beside the charts are
+  compared by their contents, and audio, video and art by size. A pack with
+  differences reads **UPDATE: N files**, and Start on it offers the update,
+  listing those files and why each one is coming: new charts for a song you
+  have, a new song, a file your copy is missing, or one that changed (Up and
+  Down scroll a long list). Only those files are downloaded, through the
+  preview relay, and unzipped over your copy. Songs whose charts changed are
+  reloaded on the spot; songs
+  that are new to the pack appear after the song reload the browser offers
+  when you leave.
+
+  Your sync is never part of an update. A song whose charts changed keeps your
+  offset, and a song new to the pack is moved to the sync the rest of your copy
+  uses; the pack's `Pack.ini` and the `.oldsync` backups a resync leaves are
+  never fetched. Files you added to a pack are never touched, and a song SMO
+  has only renamed (the same charts under a new folder name) is not fetched a
+  second time.
 - **Search** — a tab rather than a button: land on **Search** and press Start
   for a keyboard prompt that searches **pack names, chart authors and song
   titles** at once. The featured grid steps aside while results are showing,
@@ -409,7 +433,9 @@ offers that reload when you leave, exactly as it does after a download.
   background, and the views that use it show how far it has got.
 - **Installed Packs matching** compares song counts against the site's pack
   CSV, matching on a punctuation- and case-insensitive form of the folder
-  name. A renamed folder shows as "not on SMO".
+  name. A renamed folder shows as "not on SMO". The file-by-file update check
+  uses the same match, and a pack that shares no files at all with the SMO pack
+  of the same name is treated as a different pack: no update is offered.
 - **"Added", not "released":** every date here is when stepmaniaonline.net
   listed the pack, which is why the year pages say "added in". A pack named for
   2024 can perfectly well have been added in 2026.

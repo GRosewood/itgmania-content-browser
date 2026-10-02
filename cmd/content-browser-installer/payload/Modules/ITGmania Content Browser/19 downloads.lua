@@ -18,6 +18,7 @@ local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
 local refs             = CB.refs
 local NormalizeName    = CB.NormalizeName
+local PATCH            = CB.PATCH
 local Refresh          = CB.Refresh
 local RAGEFILE_READ    = CB.RAGEFILE_READ
 local RAGEFILE_WRITE   = CB.RAGEFILE_WRITE
@@ -343,7 +344,9 @@ function DL.Landed(key)
 		state.dlWatch, state.dlCancelArmed = nil, nil
 	end
 	if dl and dl.status == "done" then
-		if dl.single then
+		if dl.patch then
+			Toast(dl.note or ("Updated " .. dl.name))
+		elseif dl.single then
 			Toast("Added " .. dl.name .. " - reload songs when you leave to play it")
 		else
 			Toast("Installed " .. dl.name .. " - reload songs when you leave to play it")
@@ -479,6 +482,134 @@ function DL.StartSong(pack, song)
 		end,
 	}
 	return true, refused, key
+end
+
+-- ------------------------------------------------- updating an installed pack
+--
+-- The files a check found different or missing (PATCH, in the installed part),
+-- and nothing else: the relay cuts them out of SMO's zip into a small real one
+-- named from the pack's folder down, and it unzips straight over the copy here.
+-- A file the player added to the pack is not in it, so it is not touched.
+--
+-- The game reads charts once, when it loads songs, and the quick song reload
+-- only loads songs it does not have yet. So a song whose files changed is
+-- reloaded here, in place -- the reload the song wheel's Ctrl+Shift+R does --
+-- and only songs that are new to the pack wait for the reload on the way out.
+--
+-- Returns true and the download's key when it started, false and why when it
+-- could not.
+function DL.Patch(row, p)
+	if not (row and row.dir and p and p.status == "outdated" and #p.want > 0) then
+		return false, "nothing to update"
+	end
+	local key = "patch:" .. row.name
+	local existing = state.downloads[key]
+	if existing and (existing.status == "active" or existing.status == "installing") then
+		return true, key
+	end
+	local url = WebBase() .. "/api/packpatch/" .. p.id .. "?v=" .. p.v
+		.. "&f=" .. PATCH.Ranges(p.want)
+	if not NETWORK:IsUrlAllowed(url) then
+		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
+		return false, host .. " is missing from HttpAllowHosts"
+	end
+
+	-- the offsets this copy plays at, read before the unzip writes over them
+	local plan = PATCH.SyncPlan(p)
+
+	DL.patchSeq = (DL.patchSeq or 0) + 1
+	local zipname = "cb-patch-" .. DL.patchSeq .. ".zip"
+	local dl = {
+		status = "active", cur = 0, total = p.bytes, name = row.name,
+		patch = true, file = "/Downloads/" .. zipname,
+	}
+	state.downloads[key] = dl
+	local queued = false
+	for id in ivalues(state.dlOrder) do
+		if id == key then queued = true end
+	end
+	if not queued then state.dlOrder[#state.dlOrder+1] = key end
+
+	local function Settle(response)
+		if response.error ~= nil and ToEnumShortString(response.error) == "Cancelled" then
+			state.downloads[key] = nil
+			return
+		end
+		if response.error ~= nil or response.statusCode ~= 200 then
+			dl.status = "error"
+			if response.statusCode == 409 then
+				-- the zip on SMO was replaced after the check: look again
+				state.patches[row.name] = nil
+				dl.msg = "The pack changed on stepmaniaonline.net since it was checked."
+					.. " It is being checked again."
+			elseif response.statusCode == 413 then
+				dl.msg = "This update is most of the pack. Remove the pack from"
+					.. " the Installed tab and download it again instead."
+			else
+				dl.msg = response.errorMessage or ("HTTP " .. tostring(response.statusCode))
+			end
+			Refresh()
+			return
+		end
+
+		dl.status = "installing"
+		if not FILEMAN:Unzip("/Downloads/" .. zipname, row.dir, p.strip or 0) then
+			dl.status = "error"
+			dl.msg = "unzip failed"
+			Refresh()
+			return
+		end
+
+		-- SMO's simfiles carry SMO's sync; the songs they replace or join
+		-- go back to this copy's before anything loads them
+		local kept = PATCH.KeepSync(row.dir, plan)
+
+		-- Twice each, on purpose. ReloadFromSongDir deletes the song's cache
+		-- entry through a directory listing it only refreshes afterwards, and
+		-- the entry was written after that listing was read -- so the delete
+		-- misses, the stale entry is loaded straight back, and the song reads
+		-- exactly as it did. The first call's refresh is what lets the second
+		-- one's delete land. (Seen in the engine: one call left a changed
+		-- #TITLE as it was; the second applied it.)
+		local reloaded = 0
+		for song in ivalues(SONGMAN:GetSongsInGroup(row.name)) do
+			local folder = (song:GetSongDir() or ""):match("([^/]+)/*$")
+			if folder and p.folders[folder:lower()] then
+				if pcall(function() song:ReloadFromSongDir() song:ReloadFromSongDir() end) then
+					reloaded = reloaded + 1
+				end
+			end
+		end
+		local note = "Updated " .. row.name .. ": " .. #p.want
+			.. (#p.want == 1 and " file" or " files")
+		if kept > 0 then
+			note = note .. ", kept at your sync"
+		end
+		if p.songs > 0 then
+			-- the songs that are new to it, only a song reload can load
+			state.needsReload = true
+			state.reloadSongs = state.reloadSongs + p.songs
+			note = note .. " - reload songs when you leave for the new songs"
+		end
+		dl.note = note
+		dl.reloaded = reloaded
+		dl.status = "done"
+		dl.finishedAt = GetTimeSinceStart()
+		state.patches[row.name] = { status = "current", id = p.id, v = p.v }
+		Refresh()
+	end
+
+	dl.request = NETWORK:HttpRequest{
+		url = url,
+		downloadFile = zipname,
+		connectTimeout = 15,
+		onResponse = function(response)
+			dl.request = nil
+			Settle(response)
+			DL.Landed(key)
+		end,
+	}
+	return true, key
 end
 
 -- "Get this song", with what happened said out loud. The folder is named up
