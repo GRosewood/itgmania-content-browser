@@ -1,10 +1,10 @@
 {
-  "version": "0.10.1",
-  "notes": "Search results no longer change under you: when the list re-sorts as more matches come in, the cursor stays on the pack you were on, so Start opens that pack instead of whichever one moved into its row (which could look like a new pack was already in your library). The Beginner, Tech, Stamina and Years lists follow your pack the same way as they fill in. The chart preview's difficulty row now fits inside the window however many charts a song has, and pages through them when there are too many to show at once.",
+  "version": "0.11",
+  "notes": "New: Rip Packs. A new tab opens booster packs of 15 random songs from all over stepmaniaonline.net. Choose Modern or Vintage charts, pick charters from a list (the ones with popular packs come first) or type their names, set the Expert range, and ask for full difficulty sets if you like, then rip. The cards turn over showing each song's banner, Expert meter, charter and pack. Nothing downloads until you press KEEP: the songs then arrive as a pack of their own, all on one sync. RE-RIP deals a fresh fifteen. Previews, single songs and pack updates now download from a new host, and if the preview server runs out of its monthly allowance the browser tells you instead of failing quietly.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.10.1/itgmania-content-browser-module-0.10.1.zip",
-    "sha256": "020ce0a9258a77b486ba2c89b352ee8162d5d559ee593f3281a1fc607dab8267",
-    "bytes": 263257
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.11/itgmania-content-browser-module-0.11.zip",
+    "sha256": "7d2fcac0b4153badb9b555d38312cfcc993182e64fe43f6ba002e995e0d3dc64",
+    "bytes": 390058
   },
   "minHelper": "0.5"
 }

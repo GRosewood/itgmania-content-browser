@@ -22,6 +22,7 @@ local NormalizeName  = CB.NormalizeName
 local RAGEFILE_READ  = CB.RAGEFILE_READ
 local RAGEFILE_WRITE = CB.RAGEFILE_WRITE
 local Refresh        = CB.Refresh
+local RelayOut       = CB.RelayOut
 local Sync           = CB.Sync
 local Toast          = CB.Toast
 local WebBase        = CB.WebBase
@@ -542,6 +543,8 @@ local function ShiftOffsets(path, delta)
 	return ok
 end
 
+PATCH.ShiftOffsets = ShiftOffsets
+
 -- What an update has to keep, read before the unzip writes over it: each
 -- changed song's offset as this copy has it, and -- for songs new to the
 -- pack -- how far SMO's sync sits from this copy's, as most of the songs held
@@ -623,7 +626,9 @@ function PATCH.Pump()
 				local ok, data = pcall(JsonDecode, response.body or "")
 				if ok and type(data) == "table" and type(data.files) == "table" then list = data end
 			end
-			local result = { status = "failed" }
+			-- a relay turned off for its bandwidth is said on the row, so a
+			-- pack that cannot be checked does not read as one that was
+			local result = { status = "failed", relayOut = RelayOut(response) }
 			if list then
 				local ok, compared = pcall(Compare, row, smo.id, list)
 				if ok and compared then result = compared end
@@ -663,6 +668,8 @@ function PATCH.RowText(pack)
 		return "up to date with SMO", 0.40, 0.85, 0.45
 	elseif p.status == "queued" or p.status == "checking" then
 		return "checking files...", 0.55, 0.55, 0.55
+	elseif p.status == "failed" and p.relayOut then
+		return "can't check: relay out of bandwidth", 0.85, 0.50, 0.50
 	end
 	return nil
 end
@@ -741,17 +748,23 @@ end
 -- back when it was a dialog over a pack list -- it is the download popup now,
 -- and that opens over the pack detail page, which has no tab row of its own.
 -- Drawing one over it put the tab labels through the detail view's header.
+-- the Rip Packs tab (25 rip packs)
+local function InRipView()
+	return state.mode == "rip"
+end
+
 local function InBrowsingMode()
-	return InPackList() or InLevelView() or InYearView() or InInstalledView()
+	return InPackList() or InLevelView() or InYearView() or InInstalledView() or InRipView()
 end
 
 -- the order the tab row cycles in; index 1 is SEARCH
-local TabOrder = { "search", "pad", "keyboard", "beginner", "tech", "stamina", "doubles", "year", "installed" }
+local TabOrder = { "search", "pad", "keyboard", "beginner", "tech", "stamina", "doubles", "year", "rip", "installed" }
 
 -- which tab the current view corresponds to
 local function ActiveTabIndex()
 	local want
 	if InInstalledView() then want = "installed"
+	elseif InRipView() then want = "rip"
 	elseif InYearView() then want = "year"
 	elseif InLevelView() then want = state.mode
 	elseif state.search ~= "" then want = "search"
@@ -805,6 +818,7 @@ CB.ActiveTabIndex      = ActiveTabIndex
 CB.EnterInstalled      = EnterInstalled
 CB.InBrowsingMode      = InBrowsingMode
 CB.InInstalledView     = InInstalledView
+CB.InRipView          = InRipView
 CB.InLevelView         = InLevelView
 CB.InPackList          = InPackList
 CB.InYearView          = InYearView

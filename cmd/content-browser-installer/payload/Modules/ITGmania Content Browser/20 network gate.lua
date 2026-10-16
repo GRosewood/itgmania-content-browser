@@ -65,6 +65,14 @@ local function ReclaimInputAfterTextEntry()
 	if not state.textEntryOpen then return end
 	state.textEntryOpen = false
 	SetRedirect(true)
+	-- a prompt that is not the search: whatever asked for it gets the answer
+	if state.pendingPrompt then
+		local prompt = state.pendingPrompt
+		state.pendingPrompt = nil
+		if prompt.answer ~= nil then prompt.apply(prompt.answer) end
+		Refresh()
+		return
+	end
 	if state.pendingSearch ~= nil then
 		state.search = state.pendingSearch
 		state.pendingSearch = nil
@@ -80,6 +88,7 @@ end
 
 local function OpenSearchPrompt()
 	state.pendingSearch = nil  -- a prompt session only commits its own OnOK
+	state.pendingPrompt = nil
 	state.textEntryOpen = true
 	Refresh()  -- hides the browser UI so ScreenTextEntry is visible
 	-- note: input redirection is per screen-stack entry, so the pushed
@@ -94,6 +103,26 @@ local function OpenSearchPrompt()
 		end,
 	})
 	-- watch for the text entry closing (OK or cancel)
+	if refs.watcher then refs.watcher:queuecommand("SMOWatchTextEntry") end
+end
+
+-- The same keyboard, for anything else that wants a line typed: apply hears
+-- the answer once the prompt has closed and the browser has its input back,
+-- and hears nothing at all on a cancel.
+local function OpenTextPrompt(question, initial, maxLength, apply)
+	state.pendingSearch = nil
+	state.pendingPrompt = { apply = apply }
+	state.textEntryOpen = true
+	Refresh()
+	SCREENMAN:AddNewScreenToTop("ScreenTextEntry")
+	SCREENMAN:GetTopScreen():Load({
+		Question = question,
+		InitialAnswer = initial or "",
+		MaxInputLength = maxLength or 64,
+		OnOK = function(answer)
+			if state.pendingPrompt then state.pendingPrompt.answer = answer or "" end
+		end,
+	})
 	if refs.watcher then refs.watcher:queuecommand("SMOWatchTextEntry") end
 end
 
@@ -341,4 +370,5 @@ end
 CB.LeaveBrowser               = LeaveBrowser
 CB.NetworkBlockedReason       = NetworkBlockedReason
 CB.OpenSearchPrompt           = OpenSearchPrompt
+CB.OpenTextPrompt             = OpenTextPrompt
 CB.ReclaimInputAfterTextEntry = ReclaimInputAfterTextEntry

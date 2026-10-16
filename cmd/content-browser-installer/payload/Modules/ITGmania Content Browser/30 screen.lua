@@ -54,6 +54,7 @@ local function BrowserActor()
 	CB.Screen.ContextBand(ui)
 	CB.Screen.YearPicker(ui)
 	CB.Screen.InstalledView(ui)
+	CB.Screen.RipPacks(ui)
 	CB.Screen.DoublesView(ui)
 
 	-- The hints along the bottom, and then the list and its pane on top of

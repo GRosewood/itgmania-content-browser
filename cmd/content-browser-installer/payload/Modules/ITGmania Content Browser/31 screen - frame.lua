@@ -19,6 +19,7 @@ local LO                   = CB.LO
 local LiftAboveSystemLayer = CB.LiftAboveSystemLayer
 local REFRESH_SECS         = CB.REFRESH_SECS
 local AbandonSearch        = CB.AbandonSearch
+local FetchDlBase          = CB.FetchDlBase
 local Refresh              = CB.Refresh
 local SetRedirect          = CB.SetRedirect
 local UP                   = CB.UP
@@ -68,6 +69,7 @@ function CB.Screen.Frame()
 			end
 			state.blockedReason = LO.BlockedReason()
 			state.mode = state.blockedReason and "blocked" or "list"
+			if state.mode == "list" then FetchDlBase() end
 			-- A change on this machine that only the installer can make, told
 			-- once a session -- which, after an in-game update, is the moment
 			-- the new version first opens. Not over the network warning, which

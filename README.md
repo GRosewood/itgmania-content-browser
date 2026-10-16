@@ -9,7 +9,9 @@ menu: an in-game browser for [stepmaniaonline.net](https://stepmaniaonline.net)
 that downloads and installs song packs without leaving the game.
 
 Featured picks, pad/keyboard filtering, banners, chart details and difficulty
-histograms, search, and one-button downloads that unzip straight into `/Songs`.
+histograms, search, one-button downloads that unzip straight into `/Songs`,
+and booster packs: fifteen random songs, ripped open like a pack of trading
+cards and kept as a pack of their own.
 
 ## Install
 
@@ -80,21 +82,31 @@ with the engine's own hasher and unzip it over the module's folder. All of
 this works even if the relay below is unreachable, and every one of those
 hosts must therefore be on the allowlist -- the installer puts them there.
 
-**Four things go through the preview relay at `https://itgcontent.net`**,
+**A few things go through the preview relay at `https://itgcontent.net`**,
 because the engine cannot make them for itself: ITGmania's Lua cannot write
 binary data (`RageFile:Write` stops at the first zero byte), cannot inflate
 anything except a complete zip archive, and has no delete, move or rename.
 So the relay (the `itg-content-webapp` repo) reads the catalogue's pack zips
 with ranged requests -- never a whole pack -- and serves:
 
-* **song previews**: the one song's audio, inflated out of the pack's
-  archive, whole, so the sample seek always lands;
+* **song previews**: the one song's audio, cut out of the pack's archive
+  whole, so the sample seek always lands, as a one-file zip the engine
+  unzips;
 * **chart windows**: the sample window and every difficulty's notes, parsed
   from the simfile;
 * **single-song installs**: the song's folder re-served as a small real zip
   the engine will unzip;
+* **pack updates**: a pack's file list with each chart's GrooveStats hash, to
+  hold against your copy, and a zip of just the files that changed;
 * **pack facts**: `Pack.ini` sync, which songs carry Lua mods, and charter
-  credits.
+  credits;
+* **booster packs**: fifteen random songs that fit the Rip Packs options,
+  read out of random pack zips until enough fit, with each one's banner for
+  its card.
+
+The heavy ones -- previews, single songs, pack updates and card art -- come
+from `https://dl.itgcontent.net`, the same code on a host whose bandwidth is
+not metered; when it does not answer, the browser asks the relay instead.
 
 A machine running its own relay -- a developer with the dev server up --
 points at it by writing that URL as the one line of
@@ -113,8 +125,9 @@ next install run: its login item, launcher line and binary are removed.
   older versions so the module never loads twice.
 * **Enables network access** by adding the browser's hosts to
   `HttpAllowHosts` in `Preferences.ini` and setting `HttpEnabled=1`: the
-  catalogue hosts, `localhost` for the preview relay in development, and the
-  GitHub hosts the in-game updater reads.
+  catalogue hosts, the preview relay and its download host (`itgcontent.net`
+  and `*.itgcontent.net`), `localhost` for the preview relay in development,
+  and the GitHub hosts the in-game updater reads.
 * **Sweeps the old helper** if an earlier version installed one: its
   scheduled task or unit, its launcher line, and its binary.
 * **Says where downloads will land** -- the song folders you set up, in the

@@ -11,6 +11,7 @@ local CB = ...
 -- set by a file that has already run; nothing here reaches forwards.
 local BROWSER_DATA_DIR = CB.BROWSER_DATA_DIR
 local DL               = CB.DL
+local DlRequest        = CB.DlRequest
 local LO               = CB.LO
 local PlaySfx          = CB.PlaySfx
 local Toast            = CB.Toast
@@ -22,6 +23,8 @@ local PATCH            = CB.PATCH
 local Refresh          = CB.Refresh
 local RAGEFILE_READ    = CB.RAGEFILE_READ
 local RAGEFILE_WRITE   = CB.RAGEFILE_WRITE
+local RELAY_OUT_WHY    = CB.RELAY_OUT_WHY
+local RelayOut         = CB.RelayOut
 local SMO_BASE         = CB.SMO_BASE
 local ScanInstalled    = CB.ScanInstalled
 local Sync             = CB.Sync
@@ -298,8 +301,12 @@ end
 function DL.Measure()
 	for _, dl in pairs(state.downloads) do
 		if dl.status == "active" and dl.file then
-			local got = BytesOnDisk(dl.file, dl.cur)
-			if got and got > (dl.cur or 0) then
+			-- a download made of several files in turn (a booster's songs)
+			-- counts the ones already in as fileBase, and this one on top
+			local base = dl.fileBase or 0
+			local got = BytesOnDisk(dl.file, (dl.cur or 0) - base)
+			if got and base + got > (dl.cur or 0) then
+				got = base + got
 				dl.cur = got
 				-- SMO's listed size was wrong if the file has outgrown it,
 				-- and a bar stuck full would be wrong too
@@ -424,7 +431,8 @@ function DL.StartSong(pack, song)
 		end
 		if response.error ~= nil or response.statusCode ~= 200 then
 			dl.status = "error"
-			dl.msg = response.errorMessage or ("HTTP " .. tostring(response.statusCode))
+			dl.msg = RelayOut(response) and RELAY_OUT_WHY
+				or response.errorMessage or ("HTTP " .. tostring(response.statusCode))
 			Refresh()
 			return
 		end
@@ -432,7 +440,7 @@ function DL.StartSong(pack, song)
 		-- downloaded file when this callback returns.
 		dl.status = "installing"
 		local dest = "/Songs/" .. folder .. "/"
-		if not FILEMAN:Unzip("/Downloads/" .. zipname, dest, 0) then
+		if not FILEMAN:Unzip("/Downloads/" .. response.file, dest, 0) then
 			dl.status = "error"
 			dl.msg = "unzip failed"
 			Refresh()
@@ -471,16 +479,17 @@ function DL.StartSong(pack, song)
 
 	-- no onProgress, as for a pack: DL.Measure reads it off the disk
 	dl.file = "/Downloads/" .. zipname
-	dl.request = NETWORK:HttpRequest{
-		url = root,
+	dl.request = DlRequest("/api/songzip/" .. id .. "/" .. UrlEncode(title), {
 		downloadFile = zipname,
 		connectTimeout = 10,
+		-- DL.Measure reads the file the retry writes, if there is one
+		onRetry = function(name) dl.file = "/Downloads/" .. name end,
 		onResponse = function(response)
 			dl.request = nil
 			Settle(response)
 			DL.Landed(key)
 		end,
-	}
+	})
 	return true, refused, key
 end
 
@@ -545,6 +554,8 @@ function DL.Patch(row, p)
 			elseif response.statusCode == 413 then
 				dl.msg = "This update is most of the pack. Remove the pack from"
 					.. " the Installed tab and download it again instead."
+			elseif RelayOut(response) then
+				dl.msg = RELAY_OUT_WHY
 			else
 				dl.msg = response.errorMessage or ("HTTP " .. tostring(response.statusCode))
 			end
@@ -553,7 +564,7 @@ function DL.Patch(row, p)
 		end
 
 		dl.status = "installing"
-		if not FILEMAN:Unzip("/Downloads/" .. zipname, row.dir, p.strip or 0) then
+		if not FILEMAN:Unzip("/Downloads/" .. response.file, row.dir, p.strip or 0) then
 			dl.status = "error"
 			dl.msg = "unzip failed"
 			Refresh()
@@ -599,16 +610,16 @@ function DL.Patch(row, p)
 		Refresh()
 	end
 
-	dl.request = NETWORK:HttpRequest{
-		url = url,
+	dl.request = DlRequest("/api/packpatch/" .. p.id .. "?v=" .. p.v .. "&f=" .. PATCH.Ranges(p.want), {
 		downloadFile = zipname,
 		connectTimeout = 15,
+		onRetry = function(name) dl.file = "/Downloads/" .. name end,
 		onResponse = function(response)
 			dl.request = nil
 			Settle(response)
 			DL.Landed(key)
 		end,
-	}
+	})
 	return true, key
 end
 

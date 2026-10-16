@@ -15,6 +15,7 @@ local InBrowsingMode  = CB.InBrowsingMode
 local InInstalledView = CB.InInstalledView
 local InLevelView     = CB.InLevelView
 local InPackList      = CB.InPackList
+local InRipView       = CB.InRipView
 local InYearView      = CB.InYearView
 local LO              = CB.LO
 local Spinner         = CB.Spinner
@@ -26,8 +27,9 @@ function CB.Screen.Tabs(ui)
 	-- ---------------------------------------------------------------
 	-- filter tabs (pad / keyboard) and the view tabs
 
-	-- eight tabs now, so the labels lose their filler words; the row sits on
-	-- its own line above the readout, so the pitch only has to fit the labels
+	-- ten tabs now, so the labels lose their filler words (and squeeze to fit
+	-- when the update chip takes its share of the row); the row sits on its
+	-- own line above the readout, so the pitch only has to fit the labels
 	local tabDefs = {
 		{ view = "search",    label = "SEARCH" },
 		{ mode = "pad",       label = "PAD" },
@@ -37,6 +39,7 @@ function CB.Screen.Tabs(ui)
 		{ view = "stamina",   label = "STAMINA" },
 		{ view = "doubles",   label = "DOUBLES" },
 		{ view = "year",      label = "YEARS" },
+		{ view = "rip",       label = "RIP PACKS" },
 		{ view = "installed", label = "INSTALLED" },
 	}
 
@@ -217,7 +220,10 @@ function CB.Screen.Tabs(ui)
 			self:diffuse(0.62, 0.62, 0.62, 1)
 		end,
 		SMORefreshMessageCommand = function(self)
-			if InInstalledView() then
+			-- a booster is not a list of packs, so there is nothing to count
+			if InRipView() then
+				self:settext("")
+			elseif InInstalledView() then
 				self:settext(string.format("%d installed", #state.installed.packs))
 			elseif InYearView() then
 				-- which page of a year you are on is not interesting; how far

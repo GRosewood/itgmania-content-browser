@@ -56,7 +56,7 @@ LO.DIALOG_H    = 170
 -- view below eighteen pixels it did not have.
 LO.TABS_X      = 196                            -- clear of the header's wording
 LO.TABS_Y      = 22                             -- level with it
-LO.TABS_PITCH  = 72
+LO.TABS_PITCH  = 65                             -- ten tabs: 196 + 10 x 65 ends at 846
 LO.TAB_W       = LO.TABS_PITCH - 6              -- the selectable pill itself
 LO.TAB_H       = 20
 LO.TABS_RULE_Y = LO.TABS_Y + 12
@@ -68,7 +68,7 @@ LO.TABS_RULE_Y = LO.TABS_Y + 12
 -- wrong way round. The positions are worked out per refresh instead of once at
 -- build time, which is what lets them move at all.
 LO.UPD_W       = 56
-LO.UPD_PITCH   = 62                             -- what a tab shrinks to
+LO.UPD_PITCH   = 56                             -- what a tab shrinks to: clear of the chip at 756
 LO.UPD_RIGHT   = LO.W - LO.LIST_X - 26          -- clear of the loading spinner
 
 -- Whether the update chip is on the tab row at all.

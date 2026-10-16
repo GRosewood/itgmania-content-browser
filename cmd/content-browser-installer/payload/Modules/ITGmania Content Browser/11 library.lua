@@ -363,6 +363,139 @@ local function WebBase()
 	return webBase
 end
 
+-- The relay runs on a free host with a monthly allowance. Once it has used
+-- the allowance up, the host turns it off -- every request comes back 402,
+-- "Payment required", with x-vercel-error DEPLOYMENT_DISABLED -- and it stays
+-- off until the allowance comes round again, up to thirty days later. The
+-- answer then is not an error to retry but a fact to tell the player, in
+-- words: what is off, why, until when, and what still works.
+local RELAY_HOST = WebBase():match("^https?://([^/:]+)") or WebBase()
+local RELAY_OUT = RELAY_HOST .. " is out of bandwidth for now"
+local RELAY_OUT_WHY = "The relay these features run through, " .. RELAY_HOST .. ", has used up its "
+	.. "free monthly bandwidth, so booster packs, song previews, single songs and pack updates "
+	.. "are off until it resets, which can take up to 30 days. Whole packs still download "
+	.. "straight from stepmaniaonline.net."
+
+local function RelayOut(response)
+	if type(response) ~= "table" then return false end
+	if response.statusCode == 402 then return true end
+	if type(response.headers) == "table" then
+		for name, value in pairs(response.headers) do
+			if tostring(name):lower() == "x-vercel-error" then
+				value = tostring(value):upper()
+				if value == "DEPLOYMENT_DISABLED" or value == "DEPLOYMENT_PAUSED" then return true end
+			end
+		end
+	end
+	return false
+end
+
+-- ---------------------------------------------------------------
+-- the download host
+--
+-- The relay's heavy routes -- a song's folder, a preview's audio, a pack
+-- update, a booster card's art -- are the bulk of what it sends, and on its
+-- host every byte of them counts against a monthly allowance, twice. The same
+-- routes run on a Cloudflare Worker at dl.itgcontent.net, where bandwidth is
+-- not metered, so they come from there. Which host is the relay's to say, in
+-- its /dl.json, read once a session -- a switch its owner can flip back
+-- without a release -- and a request the download host turns away is asked
+-- of the relay itself before it fails: an outage there costs a detour, not
+-- the feature. The game's allowlist already covers *.itgcontent.net.
+local DL_HOST = "https://dl.itgcontent.net"
+local dlBase          -- what /dl.json said; "" is the relay itself
+local dlAsked = false
+local dlOverride      -- dl.txt, or the relay a webapp.txt points at; false when neither
+
+local function DlBase()
+	if dlOverride == nil then
+		dlOverride = false
+		local path = BROWSER_DATA_DIR .. "dl.txt"
+		if FILEMAN:DoesFileExist(path) then
+			local f = RageFileUtil:CreateRageFile()
+			if f:Open(path, RAGEFILE_READ) then
+				local line = tostring(f:GetLine() or ""):gsub("%s+$", ""):gsub("/+$", "")
+				if line:match("^https?://") then dlOverride = line end
+				f:Close()
+			end
+			f:destroy()
+		end
+		-- a machine running a relay of its own gets everything from it,
+		-- unless dl.txt names a download host of its own as well
+		if not dlOverride and WebBase() ~= "https://itgcontent.net" then dlOverride = WebBase() end
+	end
+	if dlOverride then return dlOverride end
+	if dlBase ~= nil then return dlBase ~= "" and dlBase or WebBase() end
+	if NETWORK:IsUrlAllowed(DL_HOST .. "/") then return DL_HOST end
+	return WebBase()
+end
+
+-- Ask the relay which host serves the heavy routes. Once a session. Until it
+-- answers, and if it cannot, the download host is used anyway: the relay
+-- being unreachable is one of the things that host is there for.
+local function FetchDlBase()
+	if dlAsked then return end
+	dlAsked = true
+	local url = WebBase() .. "/dl.json"
+	if not NETWORK:IsUrlAllowed(url) then return end
+	NETWORK:HttpRequest{
+		url = url,
+		connectTimeout = 10,
+		transferTimeout = 15,
+		onResponse = function(response)
+			if response.error ~= nil or response.statusCode ~= 200 then return end
+			local ok, data = pcall(JsonDecode, response.body or "")
+			if not (ok and type(data) == "table" and type(data.base) == "string") then return end
+			local base = data.base:gsub("/+$", "")
+			if base == "" or (base:match("^https?://") and NETWORK:IsUrlAllowed(base .. "/")) then
+				dlBase = base
+			end
+		end,
+	}
+end
+
+-- A request for one of the heavy routes: to the download host, and asked
+-- again of the relay -- which serves every one of the same routes -- when the
+-- host turns it away: no answer, a fault, a refusal, a redirect not followed.
+-- An answer the relay would give the same way (no such song, a stale patch)
+-- is final. The retry downloads under a name of its own, since the engine
+-- deletes the first file once its answer has been handled, which is after
+-- the retry has begun writing; args.onRetry hears the new name, and the
+-- response handed to args.onResponse carries the name the file landed
+-- under, as response.file. Returns a handle whose Cancel stops whichever
+-- request is out.
+local function DlRequest(path, args)
+	local handle = {}
+	local function Ask(base, file, again)
+		local req = {}
+		for k, v in pairs(args) do req[k] = v end
+		req.onRetry = nil
+		req.url = base .. path
+		req.downloadFile = file
+		req.onResponse = function(response)
+			local cancelled = response.error ~= nil and ToEnumShortString(response.error) == "Cancelled"
+			local code = tonumber(response.statusCode) or 0
+			local turnedAway = not cancelled and (response.error ~= nil or code == 0 or code >= 500
+				or code == 429 or code == 403 or (code >= 300 and code < 400))
+			if again and turnedAway then
+				local retry = file and ("relay-" .. file) or nil
+				if args.onRetry then args.onRetry(retry) end
+				handle.request = Ask(WebBase(), retry, false)
+				return
+			end
+			response.file = file
+			args.onResponse(response)
+		end
+		return NETWORK:HttpRequest(req)
+	end
+	function handle:Cancel()
+		if self.request then self.request:Cancel() end
+	end
+	local base = DlBase()
+	handle.request = Ask(base, args.downloadFile, base ~= WebBase())
+	return handle
+end
+
 -- Once a relay: URLs used to detour through a loopback helper when the
 -- machine's allowlist refused them. The installer allowlists the catalogue's
 -- hosts directly now, so this is the URL it was handed -- kept as a seam
@@ -456,10 +589,16 @@ end
 CB.BROWSER_DATA_DIR = BROWSER_DATA_DIR
 CB.Upstream         = Upstream
 CB.DeletePack       = DeletePack
+CB.DlBase           = DlBase
+CB.DlRequest        = DlRequest
+CB.FetchDlBase      = FetchDlBase
 CB.GroupDirFor      = GroupDirFor
 CB.INST_COLS        = INST_COLS
 CB.INST_ROWS        = INST_ROWS
 CB.RAGEFILE_READ    = RAGEFILE_READ
 CB.RAGEFILE_WRITE   = RAGEFILE_WRITE
+CB.RELAY_OUT        = RELAY_OUT
+CB.RELAY_OUT_WHY    = RELAY_OUT_WHY
+CB.RelayOut         = RelayOut
 CB.Sync             = Sync
 CB.WebBase          = WebBase

@@ -123,6 +123,7 @@ local state = {
 	reloadIdx     = 1,       -- which choice the reload dialog is on
 	textEntryOpen = false,
 	pendingSearch = nil,
+	pendingPrompt = nil,     -- any other typed answer, and who wants it (OpenTextPrompt)
 	reloadForUs   = false,   -- we sent the player to ScreenReloadSongsSSM
 	reloadAt      = nil,     -- when the reload offer last opened (Back waits a moment)
 	blockedReason = nil,     -- why network access is unavailable, if it is
@@ -173,6 +174,27 @@ local state = {
 
 	-- installed packs view
 	installed     = { status="idle", packs={}, cursor=1, window=0, scannedAt=nil },
+
+	-- the Rip Packs tab: booster packs (25 rip packs, 26 screen - rip packs)
+	rip = {
+		era     = "any",     -- "any" | "vintage" | "modern"
+		chosen  = {},        -- authors picked from the list, in the order picked
+		picking = false,     -- the author list is open over the tab
+		pickAt  = 1,         -- ...its cursor, an index into authors
+		pickTop = 1,         -- ...and the first row it shows
+		typed   = "",        -- exact credits typed in, comma-separated; join the chosen
+		lo      = 8,         -- the Expert chart's meter, from...
+		hi      = 14,        -- ...to
+		full    = false,     -- only songs with every singles difficulty
+		row     = 1,         -- the option row the cursor is on (RIP.ROWS)
+		authors = nil,       -- the relay's ranked charters, once fetched
+		authorsStatus = nil, -- nil | "loading" | "ready" | "failed"
+		phase   = "idle",    -- idle | searching | choosing | filling | done | failed
+		phaseAt = 0,         -- when it got there
+		pack    = nil,       -- the rip on screen: { songs, got, ...; n, folder once kept }
+		choice  = "keep",    -- while choosing: "keep" | "rerip"
+		history = nil,       -- boosters.txt, once read
+	},
 	removing      = nil,     -- pack name currently being deleted
 	smoByName     = nil,     -- normalized pack name -> {id,name,songs,bytes,sizeStr}
 	smoById       = nil,     -- pack id -> the same record, for search results

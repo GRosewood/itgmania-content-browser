@@ -29,6 +29,7 @@ local INST_COLS                  = CB.INST_COLS
 local INST_ROWS                  = CB.INST_ROWS
 local InInstalledView            = CB.InInstalledView
 local InLevelView                = CB.InLevelView
+local InRipView                  = CB.InRipView
 local InYearView                 = CB.InYearView
 local InstalledPack              = CB.InstalledPack
 -- The table itself is created in 04 and filled in 23, which loads after this
@@ -58,6 +59,11 @@ local state                      = CB.state
 -- How long the song-reload offer ignores Back after it appears (see the
 -- reload dialog's own handling, at the end of BrowserInput).
 local RELOAD_BACK_GUARD = 0.6
+
+-- The booster part loads after this one, so its two entry points are reached
+-- through the shared table when called.
+local function RipEnter(...) return CB.RipEnter(...) end
+local function RipInput(...) return CB.RipInput(...) end
 
 
 -- Open a pack's detail page.
@@ -157,7 +163,7 @@ local BrowserInput = function(event)
 	end
 
 	if state.mode == "list" or state.mode == "installed" or state.mode == "year"
-	   or InLevelView() then
+	   or InLevelView() or InRipView() then
 		local isUp    = (button == "MenuUp" or button == "Up")
 		local isDown  = (button == "MenuDown" or button == "Down")
 		local isLeft  = (button == "MenuLeft" or button == "Left")
@@ -207,6 +213,13 @@ local BrowserInput = function(event)
 		if button == "Select" and firstPress
 		   and (InLevelView() or InYearView() or state.mode == "list") then
 			ReloadThisView()
+			return false
+		end
+
+		-- the author list, open over the rip tab, takes its own keys -- Back
+		-- among them, which closes it rather than climbing to the tabs
+		if state.mode == "rip" and state.rip.picking then
+			RipInput(button, firstPress)
 			return false
 		end
 
@@ -322,6 +335,10 @@ local BrowserInput = function(event)
 					EnterInstalled()
 					state.zone = "tabs"
 					Refresh()
+				elseif choice == "rip" then
+					RipEnter()
+					state.zone = "tabs"
+					Refresh()
 				elseif choice == "year" then
 					EnterYearView()
 					state.zone = "tabs"
@@ -351,6 +368,8 @@ local BrowserInput = function(event)
 				LEVEL.Begin()
 				if state.mode == "installed" then
 					state.zone = (#state.installed.packs > 0) and "list" or "tabs"
+				elseif state.mode == "rip" then
+					state.zone = "list"
 				elseif state.mode == "year" then
 					state.zone = "years"
 				elseif state.mode == "list" and state.search == ""
@@ -368,6 +387,12 @@ local BrowserInput = function(event)
 				end
 				Refresh()
 			end
+			return false
+		end
+
+		-- the booster options and the rip button (25 rip packs)
+		if state.mode == "rip" then
+			RipInput(button, firstPress)
 			return false
 		end
 

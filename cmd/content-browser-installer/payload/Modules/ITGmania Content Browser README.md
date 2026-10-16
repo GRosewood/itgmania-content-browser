@@ -61,7 +61,7 @@ download and install packs without ever leaving the game.
   turns out to be the wrong shape is pulled from the page the moment its banner
   loads, and the gap is backfilled from rows the over-fetch already brought in.
 - **Tabs** — Search, Pad, Keyboard, Beginner, All Around, Stamina, Doubles,
-  Years and Installed. (There is no *All* tab: Pad shows 97.9% of the
+  Years, Rip Packs and Installed. (There is no *All* tab: Pad shows 97.9% of the
   catalogue, so it and Keyboard between them cover everything.)
   Left/Right moves between them; Search only takes focus, and Start opens the
   keyboard prompt.
@@ -211,6 +211,70 @@ download and install packs without ever leaving the game.
   never fetched. Files you added to a pack are never touched, and a song SMO
   has only renamed (the same charts under a new folder name) is not fetched a
   second time.
+- **Rip Packs** — booster packs, the trading-card version of downloading a
+  pack. **RIP A PACK** makes a new pack of **15 songs**, each from a different
+  pack on stepmaniaonline.net, picked at random within the options beside it:
+
+  - **Era** — any, **Vintage** (charts from before 2022) or **Modern** (2022
+    on). The date is the one the song's audio file carries inside the pack's
+    zip. A pack that has been re-zipped — a resync rewrites every file, and
+    leaves every audio file dated within days of the others and of its
+    `.oldsync` backups — carries the date of the re-zip rather than of the
+    song, so Vintage and Modern leave those packs out.
+  - **Author** — Start opens the list of charters who released packs in the
+    last two years, with how many of their packs are on arrowcloud's popular
+    list now; those come first, by how many and how high they rank there.
+    Tick as many as you like (Start), clear them all (Select), and Back closes
+    the list. The list is rebuilt weekly. Or **type** names, separated by
+    commas: each must match a whole chart credit exactly as SMO lists it, case
+    aside, so "Andeh + Exschwasion" is one credit and matches neither of them
+    alone. Ticked and typed names count together. The credit that counts is
+    the Expert chart's. With authors chosen, their own packs — where SMO
+    credits every song to them — are tried first, and when a song from each
+    of their packs does not make fifteen, the packs that matched are asked for
+    more.
+  - **Expert from / to** — the meter range for the song's Expert (singles
+    Challenge) chart, 8 to 14 to start. Left and Right step it; Start types it.
+  - **Full difficulties** — only songs with all five singles charts, Beginner
+    through Challenge.
+
+  Finding the songs takes a few seconds — the preview relay reads songs out of
+  random pack zips until fifteen fit — and then the pack tears open, with a
+  sound to go with it, and deals fifteen cards, each turning face up as it
+  lands. A card shows the song's banner (a stand-in pulses while it loads),
+  its Expert meter on a badge, the title, who charted it and the pack it came
+  from. The pack's hardest chart is the gold card, marked HARDEST — every card
+  tied for it, as long as no more than three are.
+
+  **Nothing is downloaded yet.** The button under the options turns into
+  **KEEP** and **RE-RIP**. RE-RIP throws the cards back and rips a new set with
+  whatever the options say now, leaving out the songs it threw back; it costs
+  the relay a list and fifteen banners, not the songs. KEEP makes the pack a
+  folder of its own, **Content Booster Pack *n* - *date***, and downloads its
+  songs one at a time, the same way a single song comes. The button fills as
+  they arrive, a wheel turns on the card whose song is on its way, and each
+  card lights up as its song lands. A booster is roughly 100 to 250 MB, and
+  the reload the browser offers when you leave brings it in. Settings narrow
+  enough to find fewer than fifteen songs make a smaller pack and say so.
+
+  A booster can hold songs you already have — from a pack in your library or
+  from an earlier booster — though never the same song twice in one pack. The
+  songs come from packs synced either way, so the folder takes the sync most
+  of them already have and says so in its `Pack.ini`, and each song whose own
+  pack declared the other sync has its offsets moved by the 9ms between the
+  two (a pack that declares neither is taken as ITG, the game's default). The
+  `Pack.ini` lists every song with the pack it came from, the sync that pack
+  declared, and whether its offsets were moved, and the downloads leave out
+  the `.oldsync` backups a resync puts beside the charts.
+
+  The songs themselves, previews, pack updates and card art come from
+  `dl.itgcontent.net`, a download host whose bandwidth is not metered, and
+  from the relay when that host does not answer. The relay itself runs on a
+  free host with a monthly allowance. If it has used that up, the host turns
+  it off until the allowance resets (up to 30 days), and the browser says so
+  in words wherever it would have used the relay: the rip stage, the author
+  list, song previews, single songs and pack updates. Whole packs still
+  download straight from stepmaniaonline.net.
 - **Search** — a tab rather than a button: land on **Search** and press Start
   for a keyboard prompt that searches **pack names, chart authors and song
   titles** at once. The featured grid steps aside while results are showing,
@@ -289,18 +353,20 @@ either.
 3. Start ITGmania.
 
 Or edit it yourself: with the game closed, add all of these to the
-`HttpAllowHosts` line in `Save/Preferences.ini` (the full list, because a
-hand install has no helper service to relay for it -- the installer's own
-edit is just `127.0.0.1`, and the helper reaches the rest):
+`HttpAllowHosts` line in `Save/Preferences.ini` — the same list the installer
+writes:
 
-    stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,127.0.0.1
+    stepmaniaonline.net,*.stepmaniaonline.net,arrowcloud.dance,*.arrowcloud.dance,itgdb.net,*.itgdb.net,itgcontent.net,*.itgcontent.net,localhost,github.com,*.githubusercontent.com
 
 stepmaniaonline.net is the catalogue and the packs themselves;
 arrowcloud.dance is the popularity ranking the featured grid and the beginner
-list are built from; itgdb.net is the dedicated-doubles category; and
-`127.0.0.1` is the local helper that removes packs, downloads them and reads
-song previews. Leave any of them out and the feature that needs it says so
-rather than failing quietly.
+list are built from; itgdb.net is the dedicated-doubles category;
+itgcontent.net is the relay behind previews, single songs, pack updates and
+booster packs, and `dl.itgcontent.net` — its download host, covered by the
+wildcard — serves their big files; github.com and the githubusercontent.com
+hosts are where in-game updates come from; and localhost is a relay running
+on a developer's own machine. Leave any of them out and the feature that
+needs it says so rather than failing quietly.
 
 ### Why the network step exists
 
@@ -344,6 +410,17 @@ bound to it, which is why the second gesture exists.
 
 When an update is waiting, **Right past the last tab** reaches the UPDATE
 button at the end of the row; Left comes back. See [Updating](#updating).
+
+On **Rip Packs**, Up and Down move between the options and the **RIP A PACK**
+button under them, and Left/Right change the option the cursor is on. Start
+opens the author list, types a value (the authors, either end of the meter
+range), flips Full difficulties, or rips a pack from the button. Select clears
+the chosen or typed authors back to anyone. In the author list, Up/Down move,
+Left/Right page, Start ticks, Select clears and Back closes it. Once a pack's
+cards are face up the button is a pair, **KEEP** and **RE-RIP**: Left/Right
+picks one and Start chooses it. Down from the button reaches a quiet **RESET
+OPTIONS**: Start there puts every option back as the tab first opens and shows
+the pack unopened again (not while a kept pack is still downloading).
 
 Dialogs (the song popup, download, reload, removal, sync) print their own keys
 inside the dialog itself.

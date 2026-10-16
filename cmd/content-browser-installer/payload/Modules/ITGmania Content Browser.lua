@@ -137,6 +137,12 @@ local PARTS = {
 	"23 layout.lua",              -- where everything sits on screen
 	"24 widgets.lua",             -- small actors used all over
 
+	-- Booster packs: the Rip Packs tab, its logic and its screen. Here rather
+	-- than among the screen parts below because the input part reaches the
+	-- logic at call time, and the screen part needs the logic loaded first.
+	"25 rip packs.lua",           -- ripping a booster pack: options, the ask, the songs
+	"26 screen - rip packs.lua",  -- the options, and the pack being opened
+
 	-- The screen itself. Read "30 screen.lua" first: it is the contents page
 	-- for the seventeen files after it, and says what order they go together in.
 	"30 screen.lua",

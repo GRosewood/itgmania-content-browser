@@ -27,7 +27,9 @@ var Hosts = []string{
 	"itgdb.net",
 	"*.itgdb.net",
 	// The song-preview relay, deployed -- audio, chart windows, pack facts
-	// and single-song archives all come through it.
+	// and single-song archives all come through it -- and, under the
+	// wildcard, its download host dl.itgcontent.net, a Cloudflare Worker that
+	// serves the big files without a bandwidth allowance.
 	"itgcontent.net",
 	"*.itgcontent.net",
 	// ...and the same relay running beside a development machine. localhost

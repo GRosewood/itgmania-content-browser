@@ -12,8 +12,11 @@ local CB = ...
 local BROWSER_DATA_DIR = CB.BROWSER_DATA_DIR
 local CACHE_DIR        = CB.CACHE_DIR
 local Clamp            = CB.Clamp
+local DlRequest        = CB.DlRequest
 local PlaySfx          = CB.PlaySfx
+local RELAY_OUT        = CB.RELAY_OUT
 local Refresh          = CB.Refresh
+local RelayOut         = CB.RelayOut
 local Toast            = CB.Toast
 local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
@@ -585,6 +588,11 @@ function Snd.Play(pack, song)
 				Refresh()
 				return
 			end
+			if RelayOut(response) then
+				Snd.status, Snd.message = "failed", RELAY_OUT
+				Refresh()
+				return
+			end
 			local ok, data = pcall(JsonDecode, response.body or "")
 			if not ok or type(data) ~= "table" or type(data.ext) ~= "string" then
 				local why = (ok and type(data) == "table" and data.error) or "no sample for this song"
@@ -608,22 +616,59 @@ function Snd.Play(pack, song)
 			-- a name never reused cannot collide with a file the sound
 			-- system still holds open; the engine sweeps /Downloads anyway
 			local name = "cb-prev-" .. mine .. data.ext
+			local function Progress(current, total)
+				if mine ~= Snd.token then return end
+				if total and total > 0 then
+					Snd.prog = { phase = "downloading", frac = current / total }
+				end
+			end
+
+			-- A relay that names the file sends it as a one-file zip, its
+			-- compressed bytes straight out of the pack, for the engine's own
+			-- unzip to inflate into /Downloads under the name it will play
+			-- by. Nothing on the way has to inflate it, which is what lets
+			-- the download host serve previews at all.
+			if type(data.file) == "string" and type(data.folder) == "string" then
+				local zipname = "cb-prev-" .. mine .. ".zip"
+				DlRequest("/api/audiozip/" .. id .. "/" .. UrlEncode(data.folder)
+					.. "?file=" .. UrlEncode(data.file) .. "&as=" .. UrlEncode(name), {
+					downloadFile = zipname,
+					connectTimeout = 10,
+					transferTimeout = 300,
+					onProgress = Progress,
+					onResponse = function(response)
+						if mine ~= Snd.token then return end
+						if response.error ~= nil or response.statusCode ~= 200 then
+							Snd.status = "failed"
+							Snd.message = RelayOut(response) and RELAY_OUT
+								or response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
+						elseif not FILEMAN:Unzip("/Downloads/" .. response.file, "/Downloads/", 0) then
+							Snd.status = "failed"
+							Snd.message = "the sample could not be unpacked"
+						else
+							sample.name = name
+							sample.path = "/Downloads/" .. name
+							Snd.Begin(sample)
+						end
+						Refresh()
+					end,
+				})
+				return
+			end
+
+			-- an older relay: the audio itself, inflated there
 			NETWORK:HttpRequest{
 				url = root,
 				downloadFile = name,
 				connectTimeout = 10,
 				transferTimeout = 300,
-				onProgress = function(current, total)
-					if mine ~= Snd.token then return end
-					if total and total > 0 then
-						Snd.prog = { phase = "downloading", frac = current / total }
-					end
-				end,
+				onProgress = Progress,
 				onResponse = function(response)
 					if mine ~= Snd.token then return end
 					if response.error ~= nil or response.statusCode ~= 200 then
 						Snd.status = "failed"
-						Snd.message = response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
+						Snd.message = RelayOut(response) and RELAY_OUT
+							or response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
 					else
 						sample.name = name
 						sample.path = "/Downloads/" .. name
