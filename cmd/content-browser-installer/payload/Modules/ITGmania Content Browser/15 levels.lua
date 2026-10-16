@@ -28,6 +28,7 @@ local RAGEFILE_READ     = CB.RAGEFILE_READ
 local RAGEFILE_WRITE    = CB.RAGEFILE_WRITE
 local AbandonSearch     = CB.AbandonSearch
 local Refresh           = CB.Refresh
+local RepublishRows     = CB.RepublishRows
 local RowFromCatalog    = CB.RowFromCatalog
 local Trim              = CB.Trim
 local refs              = CB.refs
@@ -474,7 +475,8 @@ local function LevelPublish()
 		Refresh()
 		return
 	end
-	FetchPacks(state.page, true)
+	-- rows land as the walk goes, so the reader's pack can move
+	RepublishRows(state.page)
 end
 
 -- Publish the list, or note that it wants publishing.

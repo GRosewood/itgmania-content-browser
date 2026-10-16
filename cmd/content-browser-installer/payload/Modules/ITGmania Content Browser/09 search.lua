@@ -14,6 +14,7 @@ local ROWS            = CB.ROWS
 local FetchServerRows = CB.FetchServerRows
 local PassesFilter    = CB.PassesFilter
 local Refresh         = CB.Refresh
+local RepublishRows   = CB.RepublishRows
 local SMO_BASE        = CB.SMO_BASE
 local Toast           = CB.Toast
 local Trim            = CB.Trim
@@ -123,13 +124,18 @@ local function SearchPublish(acc)
 	-- every answer republishes the list. Re-paging to the top here threw the
 	-- reader back to the first row each time a pack's credits arrived --
 	-- however far into the results they had walked. The ordering does shift
-	-- underneath them as scores firm up, which is the honest cost of showing
-	-- results before they are fully verified; being moved is still better
-	-- than being sent home.
+	-- as scores firm up, which is the honest cost of showing results before
+	-- they are fully verified, so the cursor goes with the pack it is on
+	-- (RepublishRows): a re-sort used to leave it on its row while another
+	-- pack slid in underneath, and Start opened that one instead.
 	local first = not acc.published
 	acc.published = true
 	local pages = math.max(1, math.ceil(#rows / ROWS))
-	FetchPacks(first and 1 or math.min(state.page, pages), not first)
+	if first then
+		FetchPacks(1, false)
+	else
+		RepublishRows(math.min(state.page, pages))
+	end
 end
 
 -- What the simfiles say, applied over what the catalogue guessed.

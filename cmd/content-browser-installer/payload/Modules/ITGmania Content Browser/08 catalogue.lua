@@ -523,9 +523,35 @@ FetchPacks = function(page, keepCursor)
 	state.fetchReq = req
 end
 
+-- Show a held list again after it changed while it was being read: search
+-- results re-sorting as their second-tier matches and credit checks land, a
+-- level or year view filling in behind the reader.
+--
+-- The cursor stays on the PACK it was on, wherever that pack has moved, and
+-- the page goes with it. Keeping only the row number slid another pack under
+-- the cursor without a sound -- a search's newest result became an older pack
+-- the player already had, so its page said "already in your library" and
+-- offered no download, and the pack they meant seemed to vanish. Only while
+-- the reader is in the list: from the tabs nothing has been chosen yet, and
+-- the top of the new order is the right place to arrive.
+local function RepublishRows(page)
+	local focus = state.zone == "list" and state.packs and state.packs[state.cursor]
+	if focus then
+		for i, pack in ipairs(state.localRows or {}) do
+			if tostring(pack.id) == tostring(focus.id) then
+				local at = math.floor((i - 1) / ROWS) + 1
+				state.cursor = i - (at - 1) * ROWS
+				return FetchPacks(at, true)
+			end
+		end
+	end
+	return FetchPacks(page, true)
+end
+
 -- -----------------------------------------------------------------------
 -- What the parts after this one use.
 
 CB.FetchPackTypes  = FetchPackTypes
 CB.FetchPacks      = FetchPacks
 CB.FetchServerRows = FetchServerRows
+CB.RepublishRows   = RepublishRows

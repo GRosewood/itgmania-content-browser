@@ -1,10 +1,10 @@
 {
-  "version": "0.10",
-  "notes": "Pack updates: the Installed tab now checks your packs against stepmaniaonline.net and marks the ones SMO has a newer version of. Start on one shows exactly which files changed and why, and downloads only those instead of the whole pack. Charts are compared by their GrooveStats hashes, so an SMO resync or a fixed credit is not counted as an update; your sync is kept on every song an update touches, and a song SMO only renamed is not downloaded a second time.",
+  "version": "0.10.1",
+  "notes": "Search results no longer change under you: when the list re-sorts as more matches come in, the cursor stays on the pack you were on, so Start opens that pack instead of whichever one moved into its row (which could look like a new pack was already in your library). The Beginner, Tech, Stamina and Years lists follow your pack the same way as they fill in. The chart preview's difficulty row now fits inside the window however many charts a song has, and pages through them when there are too many to show at once.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.10/itgmania-content-browser-module-0.10.zip",
-    "sha256": "bea4dd883d4f197e1ccda6f894fa5f18c0fa1ca631bd5efaed149717b152bd84",
-    "bytes": 261774
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.10.1/itgmania-content-browser-module-0.10.1.zip",
+    "sha256": "020ce0a9258a77b486ba2c89b352ee8162d5d559ee593f3281a1fc607dab8267",
+    "bytes": 263257
   },
   "minHelper": "0.5"
 }

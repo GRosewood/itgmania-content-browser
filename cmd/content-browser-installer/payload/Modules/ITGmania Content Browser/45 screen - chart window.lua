@@ -180,73 +180,125 @@ function CB.Screen.ChartWindow(ui, detail)
 	-- Every difficulty the song has, as the wheel would list them, with the one
 	-- on show lit. This is the selector: it is in the window because the window
 	-- is what the reader is looking at while the sample plays.
+	--
+	-- The row has to fit the window, and a song can have any number of charts:
+	-- singles, doubles, and as many edits as anyone wrote. Up to four sit at
+	-- full width with the keys that move them at either end. More lose those
+	-- labels (the footer still names the keys) and narrow to fit, and past what
+	-- fits even narrowed, the row shows a page of them round the one on show and
+	-- says how many more lie off either end.
 	local CW_CHIP_Y = CW_Y + 58
-	local CW_CHIP_W = 46
 	local CW_CHIP_H = 15
+	local CHIP_MAX, CHIP_MIN, CHIP_GAP = 46, 38, 3
+	local ROW_W = CW_W - 16          -- what the row may span inside the window
+	local MORE_W = 18                -- room for a "+3" at each end of a page
+	local LABEL_GAP = 5
+	local SLOTS = math.floor((ROW_W + CHIP_GAP) / (CHIP_MIN + CHIP_GAP))
+	local labelW = { 0, 0 }          -- the two labels, measured once at load
+
+	-- How the row is laid out for the charts there are and the one on show.
+	-- Every actor in the row asks, and all of them get the same answer: it is
+	-- only arithmetic on what Snd holds, so no part of the row waits on another.
+	local function Row()
+		local n = Snd.charts and #Snd.charts or 0
+		local row = { n = n, shown = n, first = 1, w = CHIP_MAX, labels = false }
+		local function Width(count, space)
+			return math.min(CHIP_MAX, math.floor((space + CHIP_GAP) / count) - CHIP_GAP)
+		end
+		local full = n * (CHIP_MAX + CHIP_GAP) - CHIP_GAP
+		if full / 2 + LABEL_GAP + math.max(labelW[1], labelW[2]) <= ROW_W / 2 then
+			row.labels = true
+		elseif n <= SLOTS then
+			row.w = Width(n, ROW_W)
+		else
+			local space = ROW_W - 2 * MORE_W
+			row.shown = math.floor((space + CHIP_GAP) / (CHIP_MIN + CHIP_GAP))
+			row.w = Width(row.shown, space)
+			local at = Clamp(Snd.chartIdx or 1, 1, n)
+			row.first = Clamp(at - math.floor((row.shown - 1) / 2), 1, n - row.shown + 1)
+		end
+		row.span = row.shown * (row.w + CHIP_GAP) - CHIP_GAP
+		return row
+	end
 
 	-- The row is a control, and a row of coloured boxes does not say so on its
-	-- own. The arrows sit against it, pointing at the thing they move.
-	chartWin[#chartWin+1] = Def.BitmapText{
-		Font = "Common Normal",
-		InitCommand = function(self)
-			self:horizalign(right):y(CW_CHIP_Y):zoom(0.34):visible(false)
-		end,
-		SMORefreshMessageCommand = function(self)
-			local n = Snd.charts and #Snd.charts or 0
-			self:visible(n > 1)
-			if n <= 1 then return end
-			self:x(CW_MID - n*(CW_CHIP_W + 3)/2 - 5)
-			self:settext("&MENUUP;&MENUDOWN;")
-			self:diffuse(0.75, 0.75, 0.75, 1)
-		end,
-	}
-	chartWin[#chartWin+1] = Def.BitmapText{
-		Font = "Common Normal",
-		InitCommand = function(self)
-			self:horizalign(left):y(CW_CHIP_Y):zoom(0.34):visible(false)
-		end,
-		SMORefreshMessageCommand = function(self)
-			local n = Snd.charts and #Snd.charts or 0
-			self:visible(n > 1)
-			if n <= 1 then return end
-			self:x(CW_MID + n*(CW_CHIP_W + 3)/2 + 5)
-			self:settext("difficulty")
-			self:diffuse(0.6, 0.6, 0.6, 1)
-		end,
-	}
+	-- own. The arrows sit against it, pointing at the thing they move -- where
+	-- there is room for them.
+	for side = 1, 2 do
+		chartWin[#chartWin+1] = Def.BitmapText{
+			Font = "Common Normal",
+			InitCommand = function(self)
+				self:horizalign(side == 1 and right or left):y(CW_CHIP_Y):zoom(0.34)
+				self:settext(side == 1 and "&MENUUP;&MENUDOWN;" or "difficulty")
+				labelW[side] = self:GetZoomedWidth()
+				self:visible(false)
+			end,
+			SMORefreshMessageCommand = function(self)
+				local row = Row()
+				local on = row.n > 1 and row.labels
+				self:visible(on)
+				if not on then return end
+				local edge = row.span / 2 + LABEL_GAP
+				if side == 1 then
+					self:x(CW_MID - edge):diffuse(0.75, 0.75, 0.75, 1)
+				else
+					self:x(CW_MID + edge):diffuse(0.6, 0.6, 0.6, 1)
+				end
+			end,
+		}
+	end
 
-	for slot = 1, 8 do
-		local function ChipChart()
-			local list = Snd.charts
-			return list and list[slot] or nil
-		end
-		local function ChipX()
-			local n = Snd.charts and #Snd.charts or 0
-			return CW_MID + (slot - (n + 1)/2) * (CW_CHIP_W + 3)
+	-- how many charts lie off either end of a page
+	for side = 1, 2 do
+		chartWin[#chartWin+1] = Def.BitmapText{
+			Font = "Common Normal",
+			InitCommand = function(self)
+				self:horizalign(side == 1 and right or left):y(CW_CHIP_Y):zoom(0.42):visible(false)
+			end,
+			SMORefreshMessageCommand = function(self)
+				local row = Row()
+				local off = (side == 1) and (row.first - 1) or (row.n - (row.first + row.shown - 1))
+				self:visible(off > 0)
+				if off <= 0 then return end
+				-- on a whole pixel: a "+" this small loses its upright stroke to
+				-- filtering at half of one
+				local edge = math.floor(row.span / 2 + 4)
+				self:x(side == 1 and CW_MID - edge or CW_MID + edge)
+				self:settext("+" .. off):diffuse(0.75, 0.75, 0.75, 1)
+			end,
+		}
+	end
+
+	for slot = 1, SLOTS do
+		-- the chart this chip shows, the row it is in, and where it sits
+		local function Chip()
+			local row = Row()
+			if slot > row.shown then return nil, row end
+			local index = row.first + slot - 1
+			local chart = Snd.charts and Snd.charts[index]
+			return chart, row, index, CW_MID + (slot - (row.shown + 1)/2) * (row.w + CHIP_GAP)
 		end
 
 		-- a lit edge round the one on show, so the row reads as a selection
 		-- rather than as six coloured labels
 		chartWin[#chartWin+1] = Def.Quad{
-			InitCommand = function(self)
-				self:setsize(CW_CHIP_W + 4, CW_CHIP_H + 4):visible(false)
-			end,
+			InitCommand = function(self) self:visible(false) end,
 			SMORefreshMessageCommand = function(self)
-				self:visible(ChipChart() ~= nil and slot == Snd.chartIdx)
-				self:xy(ChipX(), CW_CHIP_Y):diffuse(1, 1, 1, 0.9)
+				local chart, row, index, x = Chip()
+				self:visible(chart ~= nil and index == Snd.chartIdx)
+				if not chart then return end
+				self:xy(x, CW_CHIP_Y):setsize(row.w + 4, CW_CHIP_H + 4):diffuse(1, 1, 1, 0.9)
 			end,
 		}
 		chartWin[#chartWin+1] = Def.Quad{
-			InitCommand = function(self)
-				self:setsize(CW_CHIP_W, CW_CHIP_H):visible(false)
-			end,
+			InitCommand = function(self) self:visible(false) end,
 			SMORefreshMessageCommand = function(self)
-				local chart = ChipChart()
+				local chart, row, index, x = Chip()
 				self:visible(chart ~= nil)
 				if not chart then return end
-				self:xy(ChipX(), CW_CHIP_Y)
+				self:xy(x, CW_CHIP_Y):setsize(row.w, CW_CHIP_H)
 				local tint = Snd.DiffColor(chart)
-				if slot == Snd.chartIdx then
+				if index == Snd.chartIdx then
 					self:diffuse(tint[1], tint[2], tint[3], 1)
 				else
 					self:diffuse(tint[1], tint[2], tint[3], 0.18)
@@ -263,12 +315,12 @@ function CB.Screen.ChartWindow(ui, detail)
 					Texture = iconName,
 					InitCommand = function(self) self:zoom(10/96):visible(false) end,
 					SMORefreshMessageCommand = function(self)
-						local chart = ChipChart()
+						local chart, _, index, x = Chip()
 						local mine = chart ~= nil and tonumber(chart.lanes) == kind[1]
 						self:visible(mine)
 						if not mine then return end
-						self:xy(ChipX() - 12, CW_CHIP_Y)
-						if slot == Snd.chartIdx then
+						self:xy(x - 12, CW_CHIP_Y)
+						if index == Snd.chartIdx then
 							self:diffuse(0.06, 0.06, 0.06, 1)
 						else
 							self:diffuse(0.85, 0.85, 0.85, 1)
@@ -281,18 +333,17 @@ function CB.Screen.ChartWindow(ui, detail)
 		chartWin[#chartWin+1] = Def.BitmapText{
 			Font = "Common Normal",
 			InitCommand = function(self)
-				self:horizalign(left):zoom(0.4)
-				self:maxwidth((CW_CHIP_W - 22)/0.4):visible(false)
+				self:horizalign(left):zoom(0.4):visible(false)
 			end,
 			SMORefreshMessageCommand = function(self)
-				local chart = ChipChart()
+				local chart, row, index, x = Chip()
 				self:visible(chart ~= nil)
 				if not chart then return end
-				self:xy(ChipX() - 3, CW_CHIP_Y)
+				self:xy(x - 3, CW_CHIP_Y):maxwidth((row.w - 22)/0.4)
 				local meter = tonumber(chart.meter) or 0
 				self:settext(meter > 0 and tostring(meter)
 					or tostring(chart.diff or ""):sub(1, 3):upper())
-				if slot == Snd.chartIdx then
+				if index == Snd.chartIdx then
 					self:diffuse(0.06, 0.06, 0.06, 1)
 				else
 					self:diffuse(0.85, 0.85, 0.85, 1)

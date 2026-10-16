@@ -19,6 +19,7 @@ local PackTypeOf        = CB.PackTypeOf
 local RecentIndexStep   = CB.RecentIndexStep
 local AbandonSearch     = CB.AbandonSearch
 local Refresh           = CB.Refresh
+local RepublishRows     = CB.RepublishRows
 local YEAR_SPAN         = CB.YEAR_SPAN
 local state             = CB.state
 
@@ -100,9 +101,9 @@ RefreshYearView = function()
 	if state.mode ~= "year" or not state.viewYear then return end
 	local rows = YearRows(state.viewYear)
 	if #rows == #(state.localRows or {}) then return end
+	-- packs can land above the one being read, so it is followed, not its row
 	state.localRows = rows
-	state.cursor = Clamp(state.cursor, 1, math.max(1, #rows))
-	FetchPacks(state.page, true)
+	RepublishRows(state.page)
 end
 
 local function EnterYearView()
