@@ -271,6 +271,12 @@ download and install packs without ever leaving the game.
   declared, and whether its offsets were moved, and the downloads leave out
   the `.oldsync` backups a resync puts beside the charts.
 
+  Every pack ripped shows on [itgcontent.net/rips](https://itgcontent.net/rips)
+  — its options and its songs, nothing of who ripped it. KEEP tells the site
+  the pack was kept, by an id the relay gave the pack and nothing else, so the
+  list marks it **Kept** and anyone can download it from there; a pack thrown
+  back is marked **Re-ripped**.
+
   The songs themselves, previews, pack updates and card art come from
   `dl.itgcontent.net`, a download host whose bandwidth is not metered, and
   from the relay when that host does not answer. The relay itself runs on a

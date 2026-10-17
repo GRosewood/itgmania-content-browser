@@ -456,6 +456,8 @@ local function Landed(pack, response)
 
 	pack.songs = songs
 	pack.short = #songs < RIP.SIZE
+	-- the pack's own id, for KEEP to tell the site by (SayKept)
+	pack.ripId = type(data.rip) == "string" and data.rip:match("^%x+$") or nil
 	pack.total = 0
 	for song in ivalues(songs) do
 		pack.total = pack.total + (tonumber(song.bytes) or 0)
@@ -473,6 +475,23 @@ local function Landed(pack, response)
 	r.phaseAt = GetTimeSinceStart()
 	pack.openedAt = r.phaseAt
 	Refresh()
+end
+
+-- Tell the site the pack was kept, so its list of recent rips can mark it
+-- kept and offer it for download: the id the relay gave the pack, and
+-- nothing else. Nothing waits on the answer.
+local function SayKept(pack)
+	if not pack.ripId then return end
+	local url = WebBase() .. "/api/rips/kept"
+	if not NETWORK:IsUrlAllowed(url) then return end
+	NETWORK:HttpRequest{
+		url = url,
+		method = "POST",
+		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
+		body = NETWORK:EncodeQueryParameters{ rip = pack.ripId },
+		connectTimeout = 10,
+		transferTimeout = 15,
+	}
 end
 
 -- Keep the pack on the table: give it its number and its folder, and fetch
@@ -501,6 +520,7 @@ function RIP.Keep()
 
 	pack.sync = Majority(pack.songs)
 	WritePackIni(pack)
+	SayKept(pack)
 
 	-- a download like any other: the ticker shows it, and the reload offer
 	-- waits for it
