@@ -179,12 +179,13 @@ local state = {
 
 	-- the Rip Packs tab: booster packs (25 rip packs, 26 screen - rip packs)
 	rip = {
-		era     = "any",     -- "any" | "vintage" | "modern"
+		eras    = {},        -- eras ticked in their list (RIP.ERAS); none is any era
 		chosen  = {},        -- authors picked from the list, in the order picked
-		picking = false,     -- the author list is open over the tab
-		pickAt  = 1,         -- ...its cursor, an index into authors
+		picking = false,     -- the list open over the tab: "era" | "author", or false
+		pickAt  = 1,         -- ...its cursor, an index into that list
 		pickTop = 1,         -- ...and the first row it shows
 		typed   = "",        -- exact credits typed in, comma-separated; join the chosen
+		avoid   = "",        -- exact credits whose charts are left out, comma-separated
 		lo      = 8,         -- the Expert chart's meter, from...
 		hi      = 14,        -- ...to
 		full    = false,     -- only songs with every singles difficulty

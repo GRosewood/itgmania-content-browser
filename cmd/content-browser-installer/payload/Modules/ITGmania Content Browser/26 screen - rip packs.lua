@@ -47,7 +47,7 @@ local ART_H      = 40
 local ART_Y      = -CH/2 + 2 + ART_H/2
 local BADGE_Y    = -CH/2 + 2 + ART_H
 local INFO_Y     = 22
-local TITLE_ZOOM, CREDIT_ZOOM = 0.42, 0.36
+local TITLE_ZOOM, CREDIT_ZOOM, YEAR_ZOOM = 0.42, 0.36, 0.34
 local GOLD       = { 1.00, 0.80, 0.30 }
 
 -- the sound of the pack tearing open, when it is there to play
@@ -129,7 +129,11 @@ end
 local function RowValue(key)
 	local r = state.rip
 	if key == "era" then
-		return RIP.ERA_WORDS[r.era] or r.era
+		local eras = RIP.ErasInOrder()
+		if #eras == 0 then return "Any era  (START to choose)" end
+		local names = {}
+		for era in ivalues(eras) do names[#names+1] = RIP.ERA_SHORT[era] end
+		return table.concat(names, ", ")
 	elseif key == "author" then
 		local n = #r.chosen
 		if n == 1 then return r.chosen[1] end
@@ -143,6 +147,8 @@ local function RowValue(key)
 		return "Anyone  (START to choose)"
 	elseif key == "typed" then
 		return r.typed ~= "" and r.typed or "none  (START to type exact names)"
+	elseif key == "avoid" then
+		return r.avoid ~= "" and r.avoid or "nobody  (START to type exact names)"
 	elseif key == "lo" then
 		return tostring(r.lo)
 	elseif key == "hi" then
@@ -154,10 +160,10 @@ local function RowValue(key)
 end
 
 local ROW_LABEL = {
-	era = "ERA", author = "AUTHOR", typed = "OR TYPE AUTHORS",
+	era = "ERA", author = "AUTHOR", typed = "OR TYPE AUTHORS", avoid = "AVOID CHARTS BY",
 	lo = "EXPERT FROM", hi = "EXPERT TO", full = "FULL DIFFICULTIES",
 }
-local CYCLES = { era = true, lo = true, hi = true, full = true }
+local CYCLES = { lo = true, hi = true, full = true }
 
 function CB.Screen.RipPacks(ui)
 	local A = { cards = {} }
@@ -336,7 +342,9 @@ function CB.Screen.RipPacks(ui)
 				SMORefreshMessageCommand = function(self)
 					self:settext(RowValue(key))
 					local muted = (key == "author" and #state.rip.chosen == 0)
+						or (key == "era" and #state.rip.eras == 0)
 						or (key == "typed" and state.rip.typed == "")
+						or (key == "avoid" and state.rip.avoid == "")
 					if muted then self:diffuse(0.55, 0.55, 0.55, 1) else self:diffuse(1, 1, 1, 1) end
 				end,
 			}
@@ -477,8 +485,11 @@ function CB.Screen.RipPacks(ui)
 		SMORefreshMessageCommand = function(self)
 			local r = state.rip
 			local who = RIP.Authors()
+			local eras = RIP.ErasInOrder()
+			local named = {}
+			for era in ivalues(eras) do named[#named+1] = RIP.ERA_SHORT[era]:upper() end
 			local bits = {
-				r.era == "any" and "ANY ERA" or r.era:upper(),
+				(#eras == 0 or #eras == #RIP.ERAS) and "ANY ERA" or table.concat(named, " + "),
 				"EXPERT " .. r.lo .. (r.hi ~= r.lo and ("-" .. r.hi) or ""),
 			}
 			if #who == 1 then bits[#bits+1] = tostring(who[1]):upper()
@@ -676,19 +687,25 @@ function CB.Screen.RipPacks(ui)
 			end,
 		}
 		front[#front+1] = badge
-		-- the title and who charted it, as one block: the title takes two lines
-		-- at most and the credit sits under however many it took, so the one
-		-- command that sets both texts also measures and places them
+		-- the year, the title and who charted it, as one block: the title takes
+		-- two lines at most, the year sits over it when the song has one and the
+		-- credit under however many lines it took, so the one command that sets
+		-- the texts also measures and places them
 		front[#front+1] = Def.ActorFrame{
 			InitCommand = function(self) self:y(INFO_Y) end,
 			SMORefreshMessageCommand = function(self)
 				local song = Song(i)
 				local title, credit = self:GetChild("Title"), self:GetChild("Credit")
+				local year = self:GetChild("Year")
 				if not song then
 					title:settext("")
 					credit:settext("")
+					year:settext("")
 					return
 				end
+				local y = tonumber(song.year) or 0
+				year:settext(y > 0 and tostring(y) or "")
+				if IsFoil(i) then year:diffuse(GOLD[1], GOLD[2], GOLD[3], 1) else year:diffuse(AccentColor()) end
 				FitLines(title, tostring(song.title or ""), 2)
 				if song.state == "failed" then
 					credit:settext("could not be downloaded"):diffuse(1, 0.55, 0.55, 1)
@@ -696,13 +713,21 @@ function CB.Screen.RipPacks(ui)
 					local who = tostring(song.credit or "")
 					credit:settext(who ~= "" and ("by " .. who) or ""):diffuse(0.7, 0.7, 0.72, 1)
 				end
+				local yh = year:GetText() ~= "" and year:GetHeight() * YEAR_ZOOM or 0
+				local ygap = yh > 0 and 1 or 0
 				local th = title:GetHeight() * TITLE_ZOOM
 				local ch = credit:GetText() ~= "" and credit:GetHeight() * CREDIT_ZOOM or 0
 				local gap = ch > 0 and 3 or 0
-				local total = th + gap + ch
-				title:y(-total/2 + th/2)
+				local total = yh + ygap + th + gap + ch
+				year:y(-total/2 + yh/2)
+				title:y(-total/2 + yh + ygap + th/2)
 				credit:y(total/2 - ch/2)
 			end,
+			Def.BitmapText{
+				Name = "Year",
+				Font = "Common Normal",
+				InitCommand = function(self) self:zoom(YEAR_ZOOM) end,
+			},
 			Def.BitmapText{
 				Name = "Title",
 				Font = "Common Normal",
@@ -812,33 +837,46 @@ function CB.Screen.RipPacks(ui)
 	}
 	root[#root+1] = notice
 
-	-- -------------------------------------------------------- the author list
+	-- -------------------------------------------------------- the picker
 
-	-- Every charter the relay ranks, a screenful at a time, each with how many
-	-- of their packs are on the most-played list now. Start ticks one; as many
-	-- as wanted can be ticked, and the rip takes songs by any of them.
+	-- A list to tick any number of rows in, open over the tab: the eras, or
+	-- every charter the relay ranks -- a screenful at a time, each with how
+	-- many of their packs are on the most-played list now. The rip takes songs
+	-- from any era ticked, by any author ticked. The box is as tall as the list
+	-- it holds, up to a screenful, and stays centred.
 	local PICK_W, PICK_ROW = 400, 22
-	local PICK_H = 70 + RIP.PICK_ROWS * PICK_ROW
-	local PICK_TOP = -PICK_H/2 + 52
+	local PICK_H = 70 + RIP.PICK_ROWS * PICK_ROW     -- at its tallest
+	local PICK_TOP = -PICK_H/2 + 52                  -- the first row, from the top edge
 	local function Picking() return Showing() and state.rip.picking end
+	local function Rows() return Clamp(RIP.PickCount(), 1, RIP.PICK_ROWS) end
+	local function BoxH() return 70 + Rows() * PICK_ROW end
 	local picker = Def.ActorFrame{
 		InitCommand = function(self) self:xy(LO.W/2, LO.H/2):visible(false) end,
-		SMORefreshMessageCommand = function(self) self:visible(Picking() and true or false) end,
+		SMORefreshMessageCommand = function(self)
+			self:visible(Picking() and true or false)
+			-- laid out from the top edge, so a shorter box is moved down by
+			-- half of what it gave up
+			self:y(LO.H/2 + (PICK_H - BoxH()) / 2)
+		end,
 	}
 	picker[#picker+1] = Def.Quad{
-		InitCommand = function(self) self:setsize(LO.W * 2, LO.H * 2):diffuse(0, 0, 0, 0.7) end,
+		InitCommand = function(self) self:setsize(LO.W * 2, LO.H * 3):diffuse(0, 0, 0, 0.7) end,
 	}
 	picker[#picker+1] = Def.Quad{
-		InitCommand = function(self) self:setsize(PICK_W + 4, PICK_H + 4):diffuse(1, 1, 1, 0.9) end,
+		InitCommand = function(self) self:vertalign(top):y(-PICK_H/2 - 2):diffuse(1, 1, 1, 0.9) end,
+		SMORefreshMessageCommand = function(self) self:setsize(PICK_W + 4, BoxH() + 4) end,
 	}
 	picker[#picker+1] = Def.Quad{
-		InitCommand = function(self) self:setsize(PICK_W, PICK_H):diffuse(0.05, 0.05, 0.06, 1) end,
+		InitCommand = function(self) self:vertalign(top):y(-PICK_H/2):diffuse(0.05, 0.05, 0.06, 1) end,
+		SMORefreshMessageCommand = function(self) self:setsize(PICK_W, BoxH()) end,
 	}
 	picker[#picker+1] = Def.BitmapText{
 		Font = "Common Bold",
-		Text = "CHOOSE AUTHORS",
 		InitCommand = function(self) self:horizalign(left):xy(-PICK_W/2 + 14, -PICK_H/2 + 20):zoom(0.4) end,
-		SMORefreshMessageCommand = function(self) self:diffuse(AccentColor()) end,
+		SMORefreshMessageCommand = function(self)
+			self:settext(state.rip.picking == "era" and "CHOOSE ERAS" or "CHOOSE AUTHORS")
+			self:diffuse(AccentColor())
+		end,
 	}
 	picker[#picker+1] = Def.BitmapText{
 		Font = "Common Normal",
@@ -846,28 +884,33 @@ function CB.Screen.RipPacks(ui)
 			self:horizalign(right):xy(PICK_W/2 - 14, -PICK_H/2 + 20):zoom(0.45):diffuse(0.75, 0.75, 0.78, 1)
 		end,
 		SMORefreshMessageCommand = function(self)
-			local n = #state.rip.chosen
-			self:settext(n == 0 and "anyone" or (n .. " chosen"))
+			local r = state.rip
+			local n = #(r.picking == "era" and r.eras or r.chosen)
+			if n > 0 then
+				self:settext(n .. " chosen")
+			else
+				self:settext(r.picking == "era" and "any era" or "anyone")
+			end
 		end,
 	}
 	for k = 1, RIP.PICK_ROWS do
 		local ry = PICK_TOP + (k - 1) * PICK_ROW
-		local function Author()
-			local r = state.rip
-			return r.authors and r.authors[r.pickTop + k - 1], r.pickTop + k - 1
+		local function Item()
+			local at = state.rip.pickTop + k - 1
+			local key, label, note = RIP.PickItem(at)
+			return key, label, note, at
 		end
 		local row = Def.ActorFrame{
 			InitCommand = function(self) self:y(ry) end,
 			SMORefreshMessageCommand = function(self)
-				local a = Author()
-				self:visible(a ~= nil)
+				self:visible(Item() ~= nil)
 			end,
 		}
 		-- the cursor
 		row[#row+1] = Def.Quad{
 			InitCommand = function(self) self:setsize(PICK_W - 28, PICK_ROW - 2) end,
 			SMORefreshMessageCommand = function(self)
-				local _, at = Author()
+				local _, _, _, at = Item()
 				local c = AccentColor()
 				self:diffuse(c[1], c[2], c[3], at == state.rip.pickAt and 0.3 or 0)
 			end,
@@ -882,8 +925,8 @@ function CB.Screen.RipPacks(ui)
 		row[#row+1] = Def.Quad{
 			InitCommand = function(self) self:x(-PICK_W/2 + 30):setsize(7, 7) end,
 			SMORefreshMessageCommand = function(self)
-				local a = Author()
-				self:visible(a ~= nil and RIP.ChosenAt(tostring(a.name)) ~= nil)
+				local key = Item()
+				self:visible(key ~= nil and RIP.PickTicked(key) ~= nil)
 				self:diffuse(AccentColor())
 			end,
 		}
@@ -893,20 +936,19 @@ function CB.Screen.RipPacks(ui)
 				self:horizalign(left):x(-PICK_W/2 + 44):zoom(0.5):maxwidth((PICK_W - 150) / 0.5)
 			end,
 			SMORefreshMessageCommand = function(self)
-				local a = Author()
-				self:settext(a and tostring(a.name) or "")
+				local _, label = Item()
+				self:settext(label or "")
 			end,
 		}
-		-- how much of theirs is played now, and nothing else about them
+		-- beside an author, how much of theirs is played now, and nothing else
 		row[#row+1] = Def.BitmapText{
 			Font = "Common Normal",
 			InitCommand = function(self)
 				self:horizalign(right):x(PICK_W/2 - 26):zoom(0.42)
 			end,
 			SMORefreshMessageCommand = function(self)
-				local a = Author()
-				local n = a and tonumber(a.popular) or 0
-				self:settext(n > 0 and (n .. " popular") or "")
+				local _, _, note = Item()
+				self:settext(note or "")
 				local c = AccentColor()
 				self:diffuse(c[1], c[2], c[3], 1)
 			end,
@@ -915,14 +957,15 @@ function CB.Screen.RipPacks(ui)
 	end
 	picker[#picker+1] = ScrollBar(PICK_W/2 - 12, PICK_TOP - PICK_ROW/2, RIP.PICK_ROWS * PICK_ROW, false,
 		function()
-			local r = state.rip
-			if not (Picking() and r.authors) then return nil end
-			return #r.authors, RIP.PICK_ROWS, r.pickTop - 1
+			local n = RIP.PickCount()
+			if not Picking() or n <= RIP.PICK_ROWS then return nil end
+			return n, RIP.PICK_ROWS, state.rip.pickTop - 1
 		end)
 	picker[#picker+1] = Def.BitmapText{
 		Font = "Common Normal",
 		Text = "&START; choose    &SELECT; clear    &BACK; done",
-		InitCommand = function(self) self:y(PICK_H/2 - 16):zoom(0.45):diffuse(0.85, 0.85, 0.88, 1) end,
+		InitCommand = function(self) self:zoom(0.45):diffuse(0.85, 0.85, 0.88, 1) end,
+		SMORefreshMessageCommand = function(self) self:y(-PICK_H/2 + BoxH() - 16) end,
 	}
 
 	-- -------------------------------------------------------- the pump

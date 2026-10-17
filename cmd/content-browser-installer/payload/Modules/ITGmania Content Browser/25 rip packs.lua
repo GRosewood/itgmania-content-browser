@@ -64,21 +64,22 @@ local RIP = {}
 
 RIP.SIZE = 15
 
--- the option rows, top to bottom, and the eras the first one cycles through
-RIP.ROWS = { "era", "author", "typed", "lo", "hi", "full", "rip", "reset" }
-RIP.ERAS = { "any", "vintage", "modern" }
+-- the option rows, top to bottom, and the eras the first one's list holds
+RIP.ROWS = { "era", "author", "typed", "avoid", "lo", "hi", "full", "rip", "reset" }
+RIP.ERAS = { "modern", "mid", "vintage" }
 RIP.ERA_WORDS = {
-	any     = "Any era",
-	vintage = "Vintage: charts from before 2022",
-	modern  = "Modern: charts from 2022 on",
+	modern  = "Modern (2020-present)",
+	mid     = "Mid-era (2015-2020)",
+	vintage = "Vintage (before 2015)",
 }
+RIP.ERA_SHORT = { modern = "Modern", mid = "Mid-era", vintage = "Vintage" }
 
 local HISTORY = BROWSER_DATA_DIR .. "boosters.txt"
 local METER_MAX = 30
 
 -- what the options are when the tab first opens (state.lua starts them so),
 -- and what RESET puts them back to
-local DEFAULTS = { era = "any", typed = "", lo = 8, hi = 14, full = false }
+local DEFAULTS = { typed = "", avoid = "", lo = 8, hi = 14, full = false }
 
 -- the nine milliseconds between the two ways a pack can be synced
 local ITG_BIAS = 0.009
@@ -192,6 +193,19 @@ function RIP.Authors()
 	return out
 end
 
+-- Whose charts a rip leaves out: the names typed, each once.
+function RIP.Avoid()
+	local out, have = {}, {}
+	for name in (state.rip.avoid or ""):gmatch("[^,]+") do
+		name = Trim(name)
+		if name ~= "" and not have[name:lower()] then
+			have[name:lower()] = true
+			out[#out+1] = name
+		end
+	end
+	return out
+end
+
 -- Where an author from the list is among the chosen, or nil.
 function RIP.ChosenAt(name)
 	for i, have in ipairs(state.rip.chosen) do
@@ -200,8 +214,54 @@ function RIP.ChosenAt(name)
 	return nil
 end
 
--- the author list's rows on screen at once; the picker draws this many
+-- the picker's rows on screen at once; it draws this many
 RIP.PICK_ROWS = 12
+
+-- The picker shows one of two lists -- the eras, or the charters -- and ticks
+-- any number in it. These are the list it has open, whichever that is.
+local function PickSet()
+	local r = state.rip
+	return r.picking == "era" and r.eras or r.chosen
+end
+
+function RIP.PickCount()
+	local r = state.rip
+	if r.picking == "era" then return #RIP.ERAS end
+	return r.authors and #r.authors or 0
+end
+
+-- The i-th row: what is ticked by it, what it says, and what is beside it.
+function RIP.PickItem(i)
+	local r = state.rip
+	if r.picking == "era" then
+		local era = RIP.ERAS[i]
+		if not era then return nil end
+		return era, RIP.ERA_WORDS[era], ""
+	end
+	local a = r.authors and r.authors[i]
+	if not a then return nil end
+	local n = tonumber(a.popular) or 0
+	return tostring(a.name), tostring(a.name), n > 0 and (n .. " popular") or ""
+end
+
+-- Where a row's key is among the ticked, or nil.
+function RIP.PickTicked(key)
+	for i, have in ipairs(PickSet()) do
+		if have == key then return i end
+	end
+	return nil
+end
+
+-- The eras ticked, in the list's order rather than the order they were ticked.
+function RIP.ErasInOrder()
+	local out = {}
+	for era in ivalues(RIP.ERAS) do
+		for have in ivalues(state.rip.eras) do
+			if have == era then out[#out+1] = era break end
+		end
+	end
+	return out
+end
 
 -- ---------------------------------------------------------------- sync
 
@@ -471,8 +531,8 @@ function RIP.Start()
 	end
 
 	local pack = {
-		songs = {}, got = 0, failed = 0, authors = RIP.Authors(),
-		era = r.era, lo = r.lo, hi = r.hi, full = r.full,
+		songs = {}, got = 0, failed = 0, authors = RIP.Authors(), avoid = RIP.Avoid(),
+		eras = RIP.ErasInOrder(), lo = r.lo, hi = r.hi, full = r.full,
 	}
 	-- a re-rip asks for songs other than the ones it throws back
 	local exclude = {}
@@ -489,14 +549,17 @@ function RIP.Start()
 		url = url,
 		method = "POST",
 		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" },
-		-- authors one to a line: a credit can have a comma in it
+		-- authors one to a line: a credit can have a comma in it. eras is
+		-- always sent, even empty: a relay that sees no eras field reads the
+		-- old single era instead
 		body = NETWORK:EncodeQueryParameters{
 			n = tostring(RIP.SIZE),
-			era = r.era,
+			eras = table.concat(pack.eras, ","),
 			lo = tostring(r.lo),
 			hi = tostring(r.hi),
 			full = r.full and "1" or "0",
 			authors = table.concat(pack.authors, "\n"),
+			avoid = table.concat(pack.avoid, "\n"),
 			x = table.concat(exclude, ","),
 		},
 		connectTimeout = 15,
@@ -520,7 +583,7 @@ function RIP.Reset()
 	local r = state.rip
 	if r.phase == "filling" then return false, "a pack is still downloading" end
 	for key, value in pairs(DEFAULTS) do r[key] = value end
-	r.chosen = {}
+	r.chosen, r.eras = {}, {}
 	r.picking = false
 	r.pack, r.phase, r.choice = nil, "idle", "keep"
 	r.phaseAt = GetTimeSinceStart()
@@ -553,12 +616,12 @@ local function AskNumber(which)
 		end)
 end
 
--- The author list, open over the tab: Up and Down move through it, Left and
--- Right a screenful at a time, Start ticks or unticks the author under the
--- cursor, Select unticks them all, and Back closes it with what is ticked.
+-- The list open over the tab -- eras or authors: Up and Down move through it,
+-- Left and Right a screenful at a time, Start ticks or unticks the row under
+-- the cursor, Select unticks them all, and Back closes it with what is ticked.
 local function PickInput(button, firstPress)
 	local r = state.rip
-	local n = r.authors and #r.authors or 0
+	local n = RIP.PickCount()
 	local isUp    = (button == "MenuUp" or button == "Up")
 	local isDown  = (button == "MenuDown" or button == "Down")
 	local isLeft  = (button == "MenuLeft" or button == "Left")
@@ -580,35 +643,39 @@ local function PickInput(button, firstPress)
 		if r.pickAt >= r.pickTop + RIP.PICK_ROWS then r.pickTop = r.pickAt - RIP.PICK_ROWS + 1 end
 		PlaySfx("change")
 	elseif button == "Start" and firstPress then
-		local a = r.authors and r.authors[r.pickAt]
-		if not a then return end
-		local name = tostring(a.name)
-		local i = RIP.ChosenAt(name)
-		if i then table.remove(r.chosen, i) else r.chosen[#r.chosen+1] = name end
+		local key = RIP.PickItem(r.pickAt)
+		if not key then return end
+		local set = PickSet()
+		local i = RIP.PickTicked(key)
+		if i then table.remove(set, i) else set[#set+1] = key end
 		PlaySfx("change")
 	elseif button == "Select" and firstPress then
-		if #r.chosen == 0 then
+		local set = PickSet()
+		if #set == 0 then
 			PlaySfx("invalid")
 			return
 		end
-		r.chosen = {}
+		for i = #set, 1, -1 do set[i] = nil end
 		PlaySfx("change")
 	end
 	Refresh()
 end
 
--- Open the author list, on the first author chosen when there is one.
-local function OpenPicker()
+-- Open a list over the tab -- "era" or "author" -- on the first row ticked
+-- in it when there is one, else on its first row.
+local function OpenPicker(kind)
 	local r = state.rip
-	local n = #r.authors
-	if r.chosen[1] then
-		for i, a in ipairs(r.authors) do
-			if tostring(a.name) == r.chosen[1] then r.pickAt = i break end
+	r.picking = kind
+	local first = PickSet()[1]
+	local n = RIP.PickCount()
+	r.pickAt = 1
+	if first then
+		for i = 1, n do
+			if RIP.PickItem(i) == first then r.pickAt = i break end
 		end
 	end
-	r.pickAt = Clamp(r.pickAt, 1, n)
+	r.pickAt = Clamp(r.pickAt, 1, math.max(1, n))
 	r.pickTop = Clamp(r.pickAt - math.floor(RIP.PICK_ROWS / 2), 1, math.max(1, n - RIP.PICK_ROWS + 1))
-	r.picking = true
 end
 
 -- Every key the tab's body answers to.
@@ -640,13 +707,7 @@ function RIP.Input(button, firstPress)
 		end
 	elseif isLeft or isRight then
 		local step = isRight and 1 or -1
-		if key == "era" then
-			local at = 1
-			for i, era in ipairs(RIP.ERAS) do
-				if era == r.era then at = i end
-			end
-			r.era = RIP.ERAS[(at - 1 + step) % #RIP.ERAS + 1]
-		elseif key == "lo" then
+		if key == "lo" then
 			r.lo = Clamp(r.lo + step, 1, r.hi)
 		elseif key == "hi" then
 			r.hi = Clamp(r.hi + step, r.lo, METER_MAX)
@@ -665,9 +726,12 @@ function RIP.Input(button, firstPress)
 		end
 		PlaySfx("change")
 	elseif button == "Start" and firstPress then
-		if key == "author" then
+		if key == "era" then
+			OpenPicker("era")
+			PlaySfx("start")
+		elseif key == "author" then
 			if r.authorsStatus == "ready" and r.authors and #r.authors > 0 then
-				OpenPicker()
+				OpenPicker("author")
 				PlaySfx("start")
 			elseif r.authorsStatus == "failed" then
 				r.authorsStatus = nil
@@ -680,6 +744,10 @@ function RIP.Input(button, firstPress)
 			PlaySfx("start")
 			OpenTextPrompt("Chart authors, separated by commas", r.typed, 160,
 				function(answer) r.typed = Trim(answer or "") end)
+		elseif key == "avoid" then
+			PlaySfx("start")
+			OpenTextPrompt("Chart authors to avoid, separated by commas", r.avoid, 160,
+				function(answer) r.avoid = Trim(answer or "") end)
 		elseif key == "lo" or key == "hi" then
 			PlaySfx("start")
 			AskNumber(key)
@@ -716,8 +784,14 @@ function RIP.Input(button, firstPress)
 		end
 	elseif button == "Select" and firstPress then
 		-- Select clears the row the cursor is on back to "anyone"
-		if key == "typed" and r.typed ~= "" then
+		if key == "era" and #r.eras > 0 then
+			r.eras = {}
+			PlaySfx("change")
+		elseif key == "typed" and r.typed ~= "" then
 			r.typed = ""
+			PlaySfx("change")
+		elseif key == "avoid" and r.avoid ~= "" then
+			r.avoid = ""
 			PlaySfx("change")
 		elseif key == "author" and #r.chosen > 0 then
 			r.chosen = {}

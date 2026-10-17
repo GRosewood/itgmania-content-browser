@@ -89,6 +89,8 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 			elseif state.mode == "rip" then
 				if state.zone == "tabs" then
 					self:settext("&MENULEFT;&MENURIGHT; switch view    &MENUDOWN; options    &BACK; exit")
+				elseif state.rip.picking == "era" then
+					self:settext("&MENUUP;&MENUDOWN; move   &START; choose   &SELECT; clear   &BACK; done")
 				elseif state.rip.picking then
 					self:settext("&MENUUP;&MENUDOWN; move   &MENULEFT;&MENURIGHT; page   &START; choose   &SELECT; clear   &BACK; done")
 				else
@@ -101,8 +103,10 @@ function CB.Screen.FooterHints(ui, listAF, pane)
 						self:settext("&MENUUP; options    &BACK; exit")
 					elseif key == "rip" then
 						self:settext("&START; rip a pack    &MENUUP; options    &BACK; exit")
-					elseif key == "typed" then
+					elseif key == "typed" or key == "avoid" then
 						self:settext("&START; type names   &SELECT; clear   &MENUUP;&MENUDOWN; options   &BACK; exit")
+					elseif key == "era" then
+						self:settext("&START; choose eras   &SELECT; any era   &MENUUP;&MENUDOWN; options   &BACK; exit")
 					elseif key == "author" then
 						self:settext("&START; choose authors   &SELECT; anyone   &MENUUP;&MENUDOWN; options   &BACK; exit")
 					elseif key == "lo" or key == "hi" then

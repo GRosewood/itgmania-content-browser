@@ -215,12 +215,14 @@ download and install packs without ever leaving the game.
   pack. **RIP A PACK** makes a new pack of **15 songs**, each from a different
   pack on stepmaniaonline.net, picked at random within the options beside it:
 
-  - **Era** — any, **Vintage** (charts from before 2022) or **Modern** (2022
-    on). The date is the one the song's audio file carries inside the pack's
-    zip. A pack that has been re-zipped — a resync rewrites every file, and
-    leaves every audio file dated within days of the others and of its
-    `.oldsync` backups — carries the date of the re-zip rather than of the
-    song, so Vintage and Modern leave those packs out.
+  - **Era** — Start opens the list: **Modern** (2020–present), **Mid-era**
+    (2015–2020) and **Vintage** (before 2015). Tick any of them, as with the
+    authors below; none ticked is any era. The date is the one the song's
+    audio file carries inside the pack's zip. A pack that has been re-zipped —
+    a resync rewrites every file, and leaves every audio file dated within days
+    of the others and of its `.oldsync` backups — carries the date of the
+    re-zip rather than of the song, so a rip kept to eras leaves those packs
+    out.
   - **Author** — Start opens the list of charters who released packs in the
     last two years, with how many of their packs are on arrowcloud's popular
     list now; those come first, by how many and how high they rank there.
@@ -233,6 +235,8 @@ download and install packs without ever leaving the game.
     credits every song to them — are tried first, and when a song from each
     of their packs does not make fifteen, the packs that matched are asked for
     more.
+  - **Avoid charts by** — names typed the same way, whose charts are left out:
+    a song whose Expert chart one of them made is never in the pack.
   - **Expert from / to** — the meter range for the song's Expert (singles
     Challenge) chart, 8 to 14 to start. Left and Right step it; Start types it.
   - **Full difficulties** — only songs with all five singles charts, Beginner
@@ -242,8 +246,8 @@ download and install packs without ever leaving the game.
   random pack zips until fifteen fit — and then the pack tears open, with a
   sound to go with it, and deals fifteen cards, each turning face up as it
   lands. A card shows the song's banner (a stand-in pulses while it loads),
-  its Expert meter on a badge, the title, who charted it and the pack it came
-  from. The pack's hardest chart is the gold card, marked HARDEST — every card
+  its Expert meter on a badge, the year it is from (when its pack's dates are
+  its own), the title, who charted it and the pack it came from. The pack's hardest chart is the gold card, marked HARDEST — every card
   tied for it, as long as no more than three are.
 
   **Nothing is downloaded yet.** The button under the options turns into
@@ -413,10 +417,11 @@ button at the end of the row; Left comes back. See [Updating](#updating).
 
 On **Rip Packs**, Up and Down move between the options and the **RIP A PACK**
 button under them, and Left/Right change the option the cursor is on. Start
-opens the author list, types a value (the authors, either end of the meter
-range), flips Full difficulties, or rips a pack from the button. Select clears
-the chosen or typed authors back to anyone. In the author list, Up/Down move,
-Left/Right page, Start ticks, Select clears and Back closes it. Once a pack's
+opens the era or author list, types a value (the authors to take or avoid,
+either end of the meter range), flips Full difficulties, or rips a pack from
+the button. Select clears the eras, or the chosen, typed or avoided authors.
+In a list, Up/Down move, Left/Right page, Start ticks, Select clears and Back
+closes it. Once a pack's
 cards are face up the button is a pair, **KEEP** and **RE-RIP**: Left/Right
 picks one and Start chooses it. Down from the button reaches a quiet **RESET
 OPTIONS**: Start there puts every option back as the tab first opens and shows

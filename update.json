@@ -1,10 +1,10 @@
 {
-  "version": "0.11.1",
-  "notes": "Deleting a pack works properly now: the song reload offered when you leave takes it off the song wheel, it stays gone after a restart, you can download it again, and its folder gets a note saying it is safe to delete. Booster pack cards show their banners even when the download server can't be reached. Messages are plainer, and if a secure connection fails because this machine's date or time is wrong, the browser says so.",
+  "version": "0.12",
+  "notes": "Rip Packs: pick any mix of eras from a list, like the authors - Modern (2020-present), Mid-era (2015-2020) and Vintage (before 2015). A new Avoid Charts By option leaves out charts by the names you type. Each card now shows the year its song is from, above the title.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.11.1/itgmania-content-browser-module-0.11.1.zip",
-    "sha256": "e89d59a8de1cb77fb5a8d8b81d24ccd6b141e251e8423d4d5fcc1dbdbf27fd1d",
-    "bytes": 393246
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.12/itgmania-content-browser-module-0.12.zip",
+    "sha256": "01e708f8b95867aa4fa349956de18296df812558263927bd97552184603b3836",
+    "bytes": 394596
   },
   "minHelper": "0.5"
 }
