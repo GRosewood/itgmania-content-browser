@@ -91,7 +91,7 @@ function CB.Screen.InstalledView(ui)
 			self:zoom(0.42):diffuse(0.72, 0.72, 0.72, 1)
 		end,
 		SMORefreshMessageCommand = function(self)
-			self:settext("no Pack.ini means this machine decides:  " .. Sync.MachineLabel())
+			self:settext("packs with no Pack.ini play at:  " .. Sync.MachineLabel())
 		end,
 	}
 

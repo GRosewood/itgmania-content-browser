@@ -15,6 +15,7 @@ local CurrentPack   = CB.CurrentPack
 local DL            = CB.DL
 local FormatBytes   = CB.FormatBytes
 local InstalledPack = CB.InstalledPack
+local InLibrary     = CB.InLibrary
 local LO            = CB.LO
 local PATCH         = CB.PATCH
 local ScrollBar     = CB.ScrollBar
@@ -307,9 +308,9 @@ function CB.Screen.Dialogs(af, ui)
 				return LO.BlockedTitle(), LO.BlockedReason(),
 					"&BACK; back to the title menu"
 			end
-			local reason = state.blockedReason or "Network access is not enabled."
-			local fix = "Run the Find Content installer again, or -- with ITGmania closed -- "
-				.. LO.SetupScript() .. "  in " .. LO.MODULE_DIR
+			local reason = state.blockedReason or "This game isn't set up to go online yet."
+			local fix = "To fix it, close the game and run the Content Browser installer again"
+				.. " -- or " .. LO.SetupScript() .. "  in " .. LO.MODULE_DIR
 			return LO.BlockedTitle(), reason .. "\n\n" .. fix,
 				"&BACK; back to the title menu"
 		end, 210)
@@ -322,7 +323,7 @@ function CB.Screen.Dialogs(af, ui)
 			local det = state.details[pack.id]
 			local song = det and det.songs[state.songPick] or nil
 			local body = pack.name .. "\n" .. pack.sizeStr .. "  -  " .. pack.songs .. " songs"
-			if SONGMAN:DoesSongGroupExist(pack.name) then
+			if InLibrary(pack.name) then
 				body = body .. "\nalready in your library - remove it from the"
 					.. "\nInstalled tab if you want it again"
 			end
@@ -346,7 +347,7 @@ function CB.Screen.Dialogs(af, ui)
 			local pack = CurrentPack()
 			local det = pack and state.details[pack.id]
 			local song = det and det.songs[state.songPick] or nil
-			local have = pack ~= nil and SONGMAN:DoesSongGroupExist(pack.name)
+			local have = pack ~= nil and InLibrary(pack.name)
 			-- The first choice names the difficulty it would play once one is
 			-- known, so choosing between them is the same press as choosing
 			-- the choice. Before that it is simply "Preview": the difficulties
@@ -386,11 +387,11 @@ function CB.Screen.Dialogs(af, ui)
 			local what = (ask.song and ask.song.title)
 				or (ask.pack and ask.pack.name) or ""
 			local body = what .. "\n\n"
-				.. "Your song library, " .. ask.dir .. ", is read-only to the game, so this"
+				.. "This can't go into your song library, " .. ask.dir .. ", so it"
 				.. " would go into " .. DL.InsteadWords(ask) .. " instead.\n\n"
 				.. "On the ITG System Image, run the Content Browser installer again"
-				.. " in System Mode to make the songs drive writable during play."
-			return "Your Library Is Read-Only", body,
+				.. " in System Mode so downloads go straight to your songs drive."
+			return "Download Somewhere Else?", body,
 				"&START; download it there anyway    &BACK; cancel"
 		end, 250)
 
@@ -431,10 +432,11 @@ function CB.Screen.Dialogs(af, ui)
 		end
 		local got = table.concat(bits, " and ")
 		local gone = state.reloadGone > 0
+		-- a removal takes the full reload, every song again, so it says "all"
 		if got ~= "" and gone then
 			return "Library Changed",
 				got .. " added, " .. state.reloadGone .. " removed."
-				.. "\nReload songs now so the changes show up?"
+				.. "\nReload all songs now so the changes show up?"
 		elseif got ~= "" then
 			local what = (state.reloadSongs > 0 and state.reloadPacks == 0)
 				and "song" or "content"
@@ -444,7 +446,7 @@ function CB.Screen.Dialogs(af, ui)
 		elseif gone then
 			return "Packs Removed",
 				state.reloadGone .. (state.reloadGone == 1 and " pack" or " packs")
-				.. " removed.\nReload songs now so they leave the wheel?"
+				.. " removed.\nReload all songs now so they leave the wheel?"
 		end
 		return "Library Changed", "Reload songs now so the changes show up?"
 	end
@@ -469,9 +471,8 @@ function CB.Screen.Dialogs(af, ui)
 			-- the update again rewrites everything, which is the repair.
 			return "Update Failed",
 				tostring(job.error or "something went wrong") ..
-				"\nRun the update again to finish the job -- a failure partway "
-				.. "can leave a mix of old and new files, and a re-run rewrites "
-				.. "them all. You are on " .. UP.VERSION .. " until it completes.",
+				"\nRun the update again to finish it. You're on " .. UP.VERSION
+				.. " until it does.",
 				"&START;&BACK; back"
 		elseif phase == "downloading" then
 			return title, "Downloading...", ""
@@ -690,16 +691,12 @@ function CB.Screen.Dialogs(af, ui)
 				body = body .. (pack.syncOurs and "Change what this pack is recorded as:"
 						or "Record what this pack really is:")
 					.. "\n\n"
-					.. "If you know what this pack's sync actually is, set it here and "
-					.. "a Pack.ini is written saying so. That pins it, and this "
-					.. "machine's preference stops deciding for it. Packs made before "
-					.. "Pack.ini existed are ITG, which is why that is what this opens "
-					.. "on."
+					.. "If you know this pack's sync, set it here and a Pack.ini is "
+					.. "written saying so. Packs made before Pack.ini existed are ITG, "
+					.. "which is why this starts on ITG."
 			else
 				body = body .. "It came with its own " .. (pack.syncFile or "Pack.ini")
-					.. ", so it is left alone -- rewriting one would throw away its title, "
-					.. "banner and series keys along with the sync. Delete that file to hand "
-					.. "the pack back to the machine's preference."
+					.. ", so the browser leaves it alone."
 			end
 
 			local hint = "&BACK; close"
@@ -746,7 +743,7 @@ function CB.Screen.Dialogs(af, ui)
 			local title = dl.patch and "Updating"
 				or (dl.single and "Getting a Song" or "Downloading")
 			if dl.status == "installing" then
-				return title, name .. "\n\nUnpacking...", ""
+				return title, name .. "\n\nInstalling...", ""
 			end
 			if dl.cancelling then
 				return title, name .. "\n\nCancelling...", ""
@@ -759,8 +756,6 @@ function CB.Screen.Dialogs(af, ui)
 				and (got .. " of " .. FormatBytes(dl.total)) or (got .. " so far")
 			local body = name .. "\n" .. size
 			if dl.into then body = body .. "\ninto " .. dl.into end
-			body = body .. "\n\nThe game downloads one file at a time, so the"
-				.. " browser waits here until this one is in."
 			local hint = state.dlCancelArmed
 				and "&BACK; again to cancel it    &START; keep downloading"
 				or "&BACK; cancel"

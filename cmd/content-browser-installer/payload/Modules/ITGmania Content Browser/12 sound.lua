@@ -18,6 +18,7 @@ local RELAY_OUT        = CB.RELAY_OUT
 local Refresh          = CB.Refresh
 local RelayOut         = CB.RelayOut
 local Toast            = CB.Toast
+local Trouble          = CB.Trouble
 local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
 local state            = CB.state
@@ -480,7 +481,7 @@ function Snd.Begin(sample)
 	local name = type(sample) == "table" and tostring(sample.name or "") or ""
 	if not Snd.actor or name == "" then
 		Snd.status = "failed"
-		Snd.message = Snd.actor and "nothing came back" or "no audio output"
+		Snd.message = Snd.actor and "no preview for this song" or "no audio output"
 		return
 	end
 	Snd.actor:stop()
@@ -554,8 +555,7 @@ function Snd.Play(pack, song)
 	local root = WebBase() .. "/api/audio/" .. id .. "/" .. UrlEncode(title)
 	if not NETWORK:IsUrlAllowed(root) then
 		PlaySfx("invalid")
-		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
-		Toast(host .. " is missing from HttpAllowHosts")
+		Toast("Previews need network access - run the Content Browser installer again")
 		return
 	end
 
@@ -584,7 +584,7 @@ function Snd.Play(pack, song)
 			-- the player asked for something else, or left
 			if mine ~= Snd.token then return end
 			if response.error ~= nil then
-				Snd.status, Snd.message = "failed", "the preview endpoint is not reachable"
+				Snd.status, Snd.message = "failed", Trouble(response, "preview")
 				Refresh()
 				return
 			end
@@ -595,8 +595,11 @@ function Snd.Play(pack, song)
 			end
 			local ok, data = pcall(JsonDecode, response.body or "")
 			if not ok or type(data) ~= "table" or type(data.ext) ~= "string" then
-				local why = (ok and type(data) == "table" and data.error) or "no sample for this song"
-				Snd.status, Snd.message = "failed", tostring(why)
+				-- what the relay said is for the log, not the screen
+				if ok and type(data) == "table" and data.error then
+					Trace("[Content Browser] preview: " .. tostring(data.error))
+				end
+				Snd.status, Snd.message = "failed", "no preview for this song"
 				Refresh()
 				return
 			end
@@ -641,10 +644,10 @@ function Snd.Play(pack, song)
 						if response.error ~= nil or response.statusCode ~= 200 then
 							Snd.status = "failed"
 							Snd.message = RelayOut(response) and RELAY_OUT
-								or response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
+								or Trouble(response, "preview audio")
 						elseif not FILEMAN:Unzip("/Downloads/" .. response.file, "/Downloads/", 0) then
 							Snd.status = "failed"
-							Snd.message = "the sample could not be unpacked"
+							Snd.message = "the preview couldn't be loaded"
 						else
 							sample.name = name
 							sample.path = "/Downloads/" .. name
@@ -668,7 +671,7 @@ function Snd.Play(pack, song)
 					if response.error ~= nil or response.statusCode ~= 200 then
 						Snd.status = "failed"
 						Snd.message = RelayOut(response) and RELAY_OUT
-							or response.errorMessage or ("the sample did not arrive (HTTP " .. tostring(response.statusCode) .. ")")
+							or Trouble(response, "preview audio")
 					else
 						sample.name = name
 						sample.path = "/Downloads/" .. name

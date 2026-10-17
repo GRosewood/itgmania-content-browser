@@ -28,8 +28,10 @@ t[BROWSER_SCREEN]    = BrowserActor()
 t["ScreenReloadSongsSSM"] = Def.Actor{
 	ModuleCommand = function(self)
 		-- any differential reload (ours or Simply Love's own "Load New Songs")
-		-- picks up packs we installed, so the reload reminder is settled
-		state.needsReload = false
+		-- picks up packs we installed -- but lets go of nothing, so a pack
+		-- removed here is still on the wheel after it, and the offer stands
+		state.reloadPacks, state.reloadSongs = 0, 0
+		state.needsReload = state.reloadGone > 0 or state.reloadFull
 		if state.reloadForUs then
 			state.reloadForUs = false
 			local screen = SCREENMAN:GetTopScreen()
@@ -37,6 +39,16 @@ t["ScreenReloadSongsSSM"] = Def.Actor{
 				screen:SetNextScreenName("ScreenTitleMenu")
 			end
 		end
+	end,
+}
+
+-- The full reload -- ours after a removal, or the operator menu's "Reload
+-- Songs" -- loads the library from scratch, so everything is settled. It goes
+-- on to the title menu by itself.
+t["ScreenReloadSongs"] = Def.Actor{
+	ModuleCommand = function(self)
+		state.needsReload, state.reloadFull = false, false
+		state.reloadPacks, state.reloadSongs, state.reloadGone = 0, 0, 0
 	end,
 }
 

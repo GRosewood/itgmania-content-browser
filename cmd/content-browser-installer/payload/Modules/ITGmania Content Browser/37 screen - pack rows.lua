@@ -20,6 +20,7 @@ local InPackList     = CB.InPackList
 local LO             = CB.LO
 local MeasureBanner  = CB.MeasureBanner
 local PackTypeOf     = CB.PackTypeOf
+local InLibrary      = CB.InLibrary
 local ROWS           = CB.ROWS
 local RequestBanner  = CB.RequestBanner
 local Spinner        = CB.Spinner
@@ -287,7 +288,7 @@ function CB.Screen.PackRows()
 							self:settext("Error")
 							self:diffuse(1, 0.4, 0.4, 1)
 						end
-					elseif SONGMAN:DoesSongGroupExist(pack.name) then
+					elseif InLibrary(pack.name) then
 						self:settext("In Library")
 						self:diffuse(0.45, 0.8, 0.45, 1)
 					else

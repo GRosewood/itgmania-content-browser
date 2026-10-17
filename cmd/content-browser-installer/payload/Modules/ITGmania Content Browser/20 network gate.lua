@@ -16,6 +16,7 @@ local Refresh              = CB.Refresh
 local RunSearch            = CB.RunSearch
 local SetRedirect          = CB.SetRedirect
 local Snd                  = CB.Snd
+local Trouble              = CB.Trouble
 local UP                   = CB.UP
 local UrlAllowed           = CB.UrlAllowed
 local refs                 = CB.refs
@@ -36,11 +37,11 @@ end
 -- Why the browser cannot go online, or nil when it can.
 local function NetworkBlockedReason()
 	if UrlAllowed() then return nil end
+	-- what is wrong, in a line; the dialog that shows it says how to fix it
 	if not HttpIsEnabled() then
-		return "HttpEnabled is turned off in Save/Preferences.ini."
+		return "Internet access is turned off for this game."
 	end
-	return "stepmaniaonline.net is not in HttpAllowHosts."
-		.. " Run the installer, or the Enable Network Access script, again."
+	return "This game isn't set up to go online yet."
 end
 
 -- -----------------------------------------------------------------------
@@ -177,11 +178,9 @@ function UP.InstallerNotice()
 	if DL.InstallerRecord().version then return nil end
 	return "Run the Installer Again",
 		"This version can download packs straight onto your songs drive, "
-		.. lib.dir .. ". On the ITG System Image that drive is read-only while"
-		.. " the game runs, so for now packs still go into " .. lib.instead .. ".\n\n"
-		.. "An update from inside the game cannot change that. Quit to System Mode"
-		.. " (Caps Lock on, then Alt+F4) and run the Content Browser installer again:"
-		.. " it will offer to."
+		.. lib.dir .. ", but for now they still go into " .. lib.instead .. ".\n\n"
+		.. "To change that, quit to System Mode (Caps Lock on, then Alt+F4) and"
+		.. " run the Content Browser installer again: it will offer to."
 end
 
 -- Where update news lives: the repo's own manifest, the same file the old
@@ -264,7 +263,7 @@ function UP.Start()
 			if state.retired then return end
 			if response.error ~= nil or response.statusCode ~= 200 then
 				UP.job = { phase = "error", done = true, pct = -1,
-					error = response.errorMessage or ("HTTP " .. tostring(response.statusCode)) }
+					error = Trouble(response, "module update") }
 				Refresh()
 				return
 			end
@@ -287,7 +286,7 @@ function UP.Start()
 			end
 			if not hex or hex ~= tostring(mod.sha256):lower() then
 				UP.job = { phase = "error", done = true, pct = -1,
-					error = "the download did not match its checksum" }
+					error = "the download was damaged" }
 				Refresh()
 				return
 			end
@@ -299,7 +298,7 @@ function UP.Start()
 			local dest = "/Themes/" .. THEME:GetCurThemeName() .. "/Modules/"
 			if not FILEMAN:Unzip(zip, dest, 0) then
 				UP.job = { phase = "error", done = true, pct = -1,
-					error = "the new files could not be written" }
+					error = "the new version couldn't be saved" }
 				Refresh()
 				return
 			end

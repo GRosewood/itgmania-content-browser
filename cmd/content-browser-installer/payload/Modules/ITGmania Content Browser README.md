@@ -471,13 +471,24 @@ next song reload drops the emptied pack from the music wheel. The folders stay
 behind, empty, a few kilobytes in all, because nothing in reach can remove a
 folder.
 
+So that nobody browsing the folder later has to guess what it is, the browser
+leaves one note in it, `DELETED INGAME - SAFE TO REMOVE.txt`, saying when the
+pack was emptied and that the whole folder can go. If songs are downloaded into
+the same folder again -- the pack downloaded a second time, say -- the note's
+text is rewritten to say the folder is in use again. Its name cannot be changed
+either, so the text is what to trust.
+
 A pack on a song folder the game may only read cannot be emptied from inside
 the game, and the browser says so. On the ITG System Image that is the songs
 drive, unless the installer has made it writable during play.
 
 One wrinkle worth knowing: the engine keeps its song list in memory, so a
 deleted pack stays in the music wheel until songs are reloaded. The browser
-offers that reload when you leave, exactly as it does after a download.
+offers that reload when you leave, as it does after a download -- but after a
+removal it is the full reload, the same as Reload Songs in the operator menu.
+The quick one that follows a download only looks for new folders and never lets
+go of a song it already holds, so a removed pack would stay on the wheel
+through it. The full one takes longer, and returns to the title menu.
 
 ## Notes & known quirks
 

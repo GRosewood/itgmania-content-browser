@@ -470,7 +470,7 @@ function LO.SpaceFor(pack)
 	local need = (tonumber(pack.bytes) or 0) * 2 + LO.SPACE_MARGIN
 	if need <= free then return true, nil end
 	return false, "Not enough room: " .. pack.sizeStr .. " needs about "
-		.. FormatBytes(need) .. " free while it unpacks, and "
+		.. FormatBytes(need) .. " free, and "
 		.. (state.spaceRoot or "the songs folder") .. " has "
 		.. FormatBytes(free) .. "."
 end

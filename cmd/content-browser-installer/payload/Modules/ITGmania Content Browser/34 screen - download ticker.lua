@@ -244,7 +244,7 @@ function CB.Screen.DownloadTicker(ui)
 			-- only overlay the error text when there is nothing else to show;
 			-- transient errors over a working list surface as a toast instead
 			if state.loadErr and #state.packs == 0 then
-				self:settext("Could not reach stepmaniaonline.net\n(" .. tostring(state.loadErr) .. ")\n\nPress &MENULEFT; to retry")
+				self:settext("The pack list didn't load: " .. tostring(state.loadErr) .. "\n\nPress &MENULEFT; to retry")
 			elseif (not state.loading) and not LO.ListBuilding()
 			       and #state.packs == 0 and state.lastFetch then
 				self:settext("No packs found")

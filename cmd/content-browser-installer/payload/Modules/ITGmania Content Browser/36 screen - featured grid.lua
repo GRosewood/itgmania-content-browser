@@ -72,7 +72,7 @@ function CB.Screen.FeaturedGrid(ui)
 			local label = "POPULAR PACKS"
 			local ac = state.arrowcloud.status
 			if ac == "blocked" or ac == "failed" then
-				label = label .. "   (arrowcloud unavailable)"
+				label = label .. "   (unavailable right now)"
 			end
 			if f.status == "loading" and #f.cards == 0 then
 				label = label .. "   finding packs..."

@@ -111,15 +111,13 @@ function CB.Screen.DoublesView(ui)
 				if state.packTypesFailed and not state.smoByName then
 					-- the column cannot be built at all without the catalogue,
 					-- and saying nothing would read as "there are none"
-					self:settext("Could not reach stepmaniaonline.net for its"
-						.. " pack list, so these cannot be matched up."
+					self:settext("The doubles list couldn't load."
 						.. "  &MENULEFT; to try again.")
 				elseif col == 1 and state.doubles.blocked then
 					-- neither road reached itgdb.net: it is not on the
 					-- allowlist and the helper is not there to relay for it
-					self:settext("itgdb.net cannot be reached -- it is not"
-						.. " on this machine's allowlist."
-						.. "  Run the installer again to fix that.")
+					self:settext("The doubles list needs network access to itgdb.net."
+						.. "  Run the Content Browser installer again to turn it on.")
 				elseif Building() then
 					self:settext("")
 				else

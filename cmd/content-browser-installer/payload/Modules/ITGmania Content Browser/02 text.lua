@@ -143,6 +143,27 @@ local function Commify(n)
 	return (out:gsub("^,", ""))
 end
 
+-- A request that did not work out, in words for the player.
+--
+-- What the engine says about it -- a TLS handshake, a socket code, an HTTP
+-- status -- means nothing on screen, so it goes to the log for whoever is
+-- debugging, and the player gets the gist. A certificate the engine would not
+-- accept is the one cause worth naming: it is almost always this machine's
+-- clock, and that is something the player can fix.
+local function Trouble(response, what)
+	response = response or {}
+	local code = tonumber(response.statusCode) or 0
+	Trace("[Content Browser] " .. tostring(what or "request") .. " failed: "
+		.. tostring(response.errorMessage or ("HTTP " .. code)))
+	local said = tostring(response.errorMessage or "")
+	if said:find("X509") or said:lower():find("certificat") then
+		return "couldn't connect securely - check that this machine's date and time are right"
+	end
+	if response.error ~= nil or code == 0 then return "couldn't connect" end
+	if code == 404 then return "it isn't there any more" end
+	return "the site had a problem - try again later"
+end
+
 -- -----------------------------------------------------------------------
 -- What the parts after this one use.
 
@@ -157,4 +178,5 @@ CB.MeterColor      = MeterColor
 CB.NormalizeName   = NormalizeName
 CB.StripTags       = StripTags
 CB.Trim            = Trim
+CB.Trouble         = Trouble
 CB.UrlEncode       = UrlEncode

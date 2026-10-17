@@ -22,6 +22,7 @@ local RequestBanner   = CB.RequestBanner
 local SMO_BASE        = CB.SMO_BASE
 local Toast           = CB.Toast
 local Trim            = CB.Trim
+local Trouble         = CB.Trouble
 local UrlAllowed      = CB.UrlAllowed
 local state           = CB.state
 
@@ -53,16 +54,16 @@ local function FetchServerRows(serverStart, length, search, cb, extra)
 		onResponse = function(response)
 			if response.error ~= nil then
 				if ToEnumShortString(response.error) == "Cancelled" then return end
-				cb(nil, nil, response.errorMessage or "network error")
+				cb(nil, nil, Trouble(response, "pack list"))
 				return
 			end
 			if response.statusCode ~= 200 then
-				cb(nil, nil, "HTTP " .. tostring(response.statusCode))
+				cb(nil, nil, Trouble(response, "pack list"))
 				return
 			end
 			local ok, data = pcall(JsonDecode, response.body)
 			if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
-				cb(nil, nil, "unexpected response from server")
+				cb(nil, nil, "the site sent something unexpected - try again later")
 				return
 			end
 			local rows = {}
@@ -136,7 +137,7 @@ FetchPackTypes = function()
 				-- failure instead of spinning forever
 				if state.filterMode == "keyboard" and state.open then
 					state.loading = false
-					state.loadErr = "could not load pack type data"
+					state.loadErr = "the keyboard list couldn't be loaded"
 					Refresh()
 				end
 				if RefreshLevelView then RefreshLevelView() end

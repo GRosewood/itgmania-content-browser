@@ -17,6 +17,7 @@ local Clamp          = CB.Clamp
 local DL             = CB.DL
 local FetchPackTypes = CB.FetchPackTypes
 local GroupDirFor    = CB.GroupDirFor
+local InLibrary      = CB.InLibrary
 local INST_ROWS      = CB.INST_ROWS
 local NormalizeName  = CB.NormalizeName
 local RAGEFILE_READ  = CB.RAGEFILE_READ
@@ -81,7 +82,12 @@ end
 local function ScanInstalled()
 	local inst = state.installed
 	inst.packs = {}
+	-- the engine's groups, less the packs emptied here (see InLibrary)
+	local names = {}
 	for name in ivalues(SONGMAN:GetSongGroupNames()) do
+		if InLibrary(name) then names[#names+1] = name end
+	end
+	for name in ivalues(names) do
 		local songs = SONGMAN:GetSongsInGroup(name)
 		local dir = GroupDirFor(songs)
 		-- SONGMAN gives the real folder, which is why the sync check lives
@@ -669,7 +675,7 @@ function PATCH.RowText(pack)
 	elseif p.status == "queued" or p.status == "checking" then
 		return "checking files...", 0.55, 0.55, 0.55
 	elseif p.status == "failed" and p.relayOut then
-		return "can't check: relay out of bandwidth", 0.85, 0.50, 0.50
+		return "can't check right now", 0.85, 0.50, 0.50
 	end
 	return nil
 end

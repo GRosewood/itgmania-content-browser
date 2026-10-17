@@ -286,13 +286,13 @@ local BrowserInput = function(event)
 				-- Newer, but not by this road. Saying so beats starting a job
 				-- that reports its own failure a second later.
 				PlaySfx("invalid")
-				Toast(UP.Latest() .. " cannot be installed from here -- run the installer once")
+				Toast(UP.Latest() .. " comes with the Content Browser installer - run it once to update")
 			elseif button == "Start" and firstPress then
 				PlaySfx("start")
 				state.mode = "update"
 				if not UP.Start() then
 					UP.job = { phase = "error", done = true, pct = -1,
-						error = "the update could not be started" }
+						error = "the update couldn't start" }
 				end
 				-- start the clock that reads its progress
 				if refs.heart then refs.heart:playcommand("SMOArmHeartbeat") end
@@ -1210,8 +1210,9 @@ local BrowserInput = function(event)
 		-- again is where the next offer comes from.
 		local function LeaveUnreloaded()
 			PlaySfx("cancel")
-			SCREENMAN:SystemMessage("Songs not reloaded - the new content shows up after a"
-				.. " reload, which Find Content offers again when you leave it")
+			SCREENMAN:SystemMessage("Songs not reloaded - "
+				.. (state.reloadGone > 0 and "the changes show up" or "the new content shows up")
+				.. " after a reload, which Find Content offers again when you leave it")
 			LeaveBrowser("ScreenTitleMenu")
 		end
 		if (button == "MenuLeft" or button == "Left"
@@ -1234,10 +1235,21 @@ local BrowserInput = function(event)
 				return false
 			end
 			PlaySfx("start")
-			state.needsReload = false
+			-- A removed pack needs the full reload. Simply Love's quick one
+			-- (OnlyLoadAdditions) only looks for new folders and never lets go
+			-- of a song it already holds, so a pack emptied here stayed on the
+			-- wheel through it. The full one frees every song and loads the
+			-- library again -- slower, which is why it is kept for removals --
+			-- and goes on to the title menu by itself.
+			local full = state.reloadGone > 0 or state.reloadFull
+			state.needsReload, state.reloadFull = false, false
 			state.reloadPacks, state.reloadSongs, state.reloadGone = 0, 0, 0
-			state.reloadForUs = true
-			LeaveBrowser("ScreenReloadSongsSSM")
+			if full then
+				LeaveBrowser("ScreenReloadSongs")
+			else
+				state.reloadForUs = true
+				LeaveBrowser("ScreenReloadSongsSSM")
+			end
 		elseif button == "Back" and firstPress then
 			-- Back is how this was reached -- Back climbs out a rung at a time,
 			-- and from the tab row it opens this -- so one press too many used

@@ -75,9 +75,10 @@ the engine's own `downloadFile` and land it in `/Songs` with
 `FILEMAN:Unzip` -- in the first song folder you listed that the game may
 write to, else its own (see [Where downloads land](#where-downloads-land)).
 Pack deletion truncates every file to zero bytes -- the one
-kind of remove the engine allows -- reclaiming the disk immediately; the
-emptied group leaves the music wheel on the next song reload, which the
-browser offers on the way out. In-game updates verify the archive's SHA-256
+kind of remove the engine allows -- reclaiming the disk immediately, and
+leaves a `DELETED INGAME - SAFE TO REMOVE.txt` note in the folder; the
+emptied group leaves the music wheel on the full song reload the browser
+offers on the way out. In-game updates verify the archive's SHA-256
 with the engine's own hasher and unzip it over the module's folder. All of
 this works even if the relay below is unreachable, and every one of those
 hosts must therefore be on the allowlist -- the installer puts them there.

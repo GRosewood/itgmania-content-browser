@@ -23,6 +23,7 @@ local MeterColor     = CB.MeterColor
 local RequestBanner  = CB.RequestBanner
 local SONG_ROWS      = CB.SONG_ROWS
 local ScrollBar      = CB.ScrollBar
+local InLibrary      = CB.InLibrary
 local Snd            = CB.Snd
 local Spinner        = CB.Spinner
 local SpinnerChild   = CB.SpinnerChild
@@ -419,7 +420,7 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 				else
 					text = "download failed: " .. tostring(dl.msg)
 				end
-			elseif SONGMAN:DoesSongGroupExist(pack.name) then
+			elseif InLibrary(pack.name) then
 				text = "already in your library"
 			end
 			self:settext(text)
@@ -578,7 +579,7 @@ function CB.Screen.DetailPage(HIST_MAX_BARS)
 					or "INSTALLED - RELOAD SONGS", false
 			end
 		end
-		if SONGMAN:DoesSongGroupExist(pack.name) then
+		if InLibrary(pack.name) then
 			return "IN YOUR LIBRARY", false
 		end
 		local size = (pack.sizeStr ~= "") and ("   " .. pack.sizeStr) or ""

@@ -28,6 +28,7 @@ local RelayOut         = CB.RelayOut
 local RequestBanner    = CB.RequestBanner
 local Toast            = CB.Toast
 local Trim             = CB.Trim
+local Trouble          = CB.Trouble
 local UrlEncode        = CB.UrlEncode
 local WebBase          = CB.WebBase
 local refs             = CB.refs
@@ -381,9 +382,11 @@ local function Landed(pack, response)
 			pack.relayOut = true
 			pack.msg = RELAY_OUT
 		elseif data and data.error then
-			pack.msg = "the search failed: " .. tostring(data.error)
+			-- what the relay said is for the log, not the screen
+			Trace("[Content Browser] booster search: " .. tostring(data.error))
+			pack.msg = "the search didn't work - try again"
 		elseif response.error ~= nil or response.statusCode ~= 200 then
-			pack.msg = "the search failed: " .. (response.errorMessage or ("HTTP " .. tostring(response.statusCode)))
+			pack.msg = "the search didn't work: " .. Trouble(response, "booster search")
 		else
 			pack.msg = "no songs on stepmaniaonline.net match these settings"
 		end
@@ -423,7 +426,7 @@ function RIP.Keep()
 	local lib = DL.ReadOnlyLibrary()
 	if lib and not state.libraryOk then
 		state.libraryOk = true
-		Toast("Your library is read-only, so booster packs go to " .. DL.InsteadWords(lib))
+		Toast("Booster packs go to " .. DL.InsteadWords(lib))
 	end
 
 	local h = RIP.History()
@@ -464,8 +467,7 @@ function RIP.Start()
 	local base = WebBase()
 	local url = base .. "/api/booster"
 	if not NETWORK:IsUrlAllowed(url) then
-		local host = base:match("^https?://([^/:]+)") or base
-		return false, host .. " is missing from HttpAllowHosts"
+		return false, "this needs network access - run the Content Browser installer again"
 	end
 
 	local pack = {

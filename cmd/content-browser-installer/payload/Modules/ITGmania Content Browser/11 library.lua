@@ -257,9 +257,8 @@ function Sync.Health(pack)
 		--
 		-- So this is amber, with the one thing that clears it.
 		if applied and applied ~= pack.sync then
-			return "warn", "its Pack.ini says " .. pack.sync .. " but the library was "
-				.. "loaded before that file existed - reload songs and it will play "
-				.. "as " .. pack.sync
+			return "warn", "its Pack.ini says " .. pack.sync .. " - reload songs and it "
+				.. "will play as " .. pack.sync
 		end
 		-- Green: something says what this pack is, and it is playing that way.
 		-- Which file said so does not change that, so it is said plainly.
@@ -276,7 +275,7 @@ function Sync.Health(pack)
 	end
 	if how == "smo" then
 		return "warn", "SMO lists this pack as " .. believed
-			.. ", which is what is being applied, but nothing in the pack pins it"
+			.. ", and it plays that way, but it has no Pack.ini to say so"
 	end
 	return "warn", "no Pack.ini, so it plays at this machine's default (" .. now .. ")"
 end
@@ -306,17 +305,14 @@ end
 -- The standing explanation, shown on the sync screen whatever it is being
 -- opened for.
 function Sync.Explain()
-	return "A pack is either ITG synced -- its chart files were written with 9ms "
-		.. "added, which the engine takes back off on the way in -- or NULL synced, "
-		.. "written with no offset at all. A Pack.ini is how a pack says which. "
-		.. "Without one, this machine's "
-		.. "DefaultSyncOffset answers for every unlabelled pack at once.\n\n"
+	return "A pack is either ITG synced -- its charts include the 9ms ITG offset -- "
+		.. "or NULL synced, with no offset. A Pack.ini says which. Without one, the "
+		.. "pack plays at this machine's default.\n\n"
 		.. "Packs made before Pack.ini existed are ITG, so that is what an unknown pack "
 		.. "is taken to be here, and what gets written unless you say otherwise.\n\n"
 		.. "If you know what a pack really is -- you made it, or you have played it "
-		.. "enough to be sure -- this is where to say so. Writing a Pack.ini here "
-		.. "records that sync for this pack on this machine and every other, and it "
-		.. "can be changed again at any time."
+		.. "enough to be sure -- set it here. That writes a Pack.ini for the pack, and "
+		.. "you can change it again any time."
 end
 
 -- /Songs/<Group>/<Song>/  ->  /Songs/<Group>/
@@ -368,13 +364,12 @@ end
 -- "Payment required", with x-vercel-error DEPLOYMENT_DISABLED -- and it stays
 -- off until the allowance comes round again, up to thirty days later. The
 -- answer then is not an error to retry but a fact to tell the player, in
--- words: what is off, why, until when, and what still works.
-local RELAY_HOST = WebBase():match("^https?://([^/:]+)") or WebBase()
-local RELAY_OUT = RELAY_HOST .. " is out of bandwidth for now"
-local RELAY_OUT_WHY = "The relay these features run through, " .. RELAY_HOST .. ", has used up its "
-	.. "free monthly bandwidth, so booster packs, song previews, single songs and pack updates "
-	.. "are off until it resets, which can take up to 30 days. Whole packs still download "
-	.. "straight from stepmaniaonline.net."
+-- words: what is off, until when, and what still works. Not why: hosting and
+-- its allowances are nothing a player needs to hear about.
+local RELAY_OUT = "unavailable for now - back within a month"
+local RELAY_OUT_WHY = "Booster packs, song previews, single songs and pack updates are "
+	.. "unavailable for now, and will be back within a month. Whole packs still "
+	.. "download as usual."
 
 local function RelayOut(response)
 	if type(response) ~= "table" then return false end
@@ -530,23 +525,124 @@ local function TruncateTree(dir, seen)
 	if seen[dir] then return 0, 0 end
 	seen[dir] = true
 
+	-- The full listing has the folders in it too, and a folder cannot be opened
+	-- as a file: each one used to be counted as a locked file.
+	local subdirs = FILEMAN:GetDirListing(dir, true, false)
+	local isDir = {}
+	for name in ivalues(subdirs) do isDir[name] = true end
+
 	for name in ivalues(FILEMAN:GetDirListing(dir, false, false)) do
-		local path = dir .. name
-		local file = RageFileUtil:CreateRageFile()
-		if file:Open(path, RAGEFILE_WRITE) then
-			file:Close()
-			wiped = wiped + 1
-		else
-			failed = failed + 1
+		if not isDir[name] then
+			local file = RageFileUtil:CreateRageFile()
+			if file:Open(dir .. name, RAGEFILE_WRITE) then
+				file:Close()
+				wiped = wiped + 1
+			else
+				failed = failed + 1
+			end
+			file:destroy()
 		end
-		file:destroy()
 	end
 
-	for name in ivalues(FILEMAN:GetDirListing(dir, true, false)) do
+	for name in ivalues(subdirs) do
 		local w, f = TruncateTree(dir .. name .. "/", seen)
 		wiped, failed = wiped + w, failed + f
 	end
 	return wiped, failed
+end
+
+-- What an emptied pack's folder says to anyone who opens it outside the game.
+--
+-- Its files stay behind, each at zero bytes, and so do its folders: nothing
+-- in reach can remove either. So the folder gets one file that does have
+-- something in it, whose name says what the folder is. That note cannot be
+-- renamed or removed later either -- so when songs land in the same folder
+-- again (the pack downloaded a second time, the singles folder reused) its
+-- words are rewritten to say the folder is in use, and its name is the one
+-- thing left saying otherwise. The deletions of this session are remembered
+-- as well, so that holds even where the engine's listing has not yet caught
+-- up with the note being written.
+local DELETED_NOTE = "DELETED INGAME - SAFE TO REMOVE.txt"
+
+-- The engine keeps its own copy of every song in its song cache, and an
+-- ordinary start trusts that copy without looking in the folder again. So a
+-- pack emptied here came back at the next start as it was, charts and all,
+-- unless a full reload had rewritten the cache first -- and a pack downloaded
+-- again into a folder that had been emptied came back with no charts. A
+-- cached copy that will not load sends the engine to the folder itself, so
+-- each song's copy is emptied along with it. The path is the one
+-- SongCacheIndex::GetCacheFilePath builds, which Lua cannot call.
+local function ForgetCached(group)
+	for song in ivalues(SONGMAN:GetSongsInGroup(group) or {}) do
+		local s = (song:GetSongDir():gsub("^/", ""):gsub("/$", ""))
+		s = s:gsub("[/\192\193\245-\255]", "_")
+		local f = RageFileUtil:CreateRageFile()
+		if f:Open("/Cache/Songs/" .. s, RAGEFILE_WRITE) then f:Close() end
+		f:destroy()
+	end
+end
+
+local function Stamp()
+	return string.format("%04d-%02d-%02d at %02d:%02d",
+		Year(), MonthOfYear() + 1, DayOfMonth(), Hour(), Minute())
+end
+
+local function WriteNote(dir, lines)
+	local f = RageFileUtil:CreateRageFile()
+	local ok = f:Open(dir .. DELETED_NOTE, RAGEFILE_WRITE)
+	if ok then
+		f:Write(table.concat(lines, "\n") .. "\n")
+		f:Close()
+	end
+	f:destroy()
+	return ok
+end
+
+local function MarkDeleted(dir)
+	state.deletedDirs[dir:lower()] = true
+	return WriteNote(dir, {
+		"DELETED INGAME - SAFE TO REMOVE",
+		"",
+		"This pack was deleted in game on " .. Stamp() .. ".",
+		"Everything in this folder is empty. Delete the whole folder.",
+	})
+end
+
+-- Songs have just landed in dir. If it was emptied by a deletion, its note
+-- says so no longer -- and the engine, which still holds the emptied songs,
+-- needs the full reload to see what came back (see ForgetCached).
+local function KeepNote(dir)
+	if not (state.deletedDirs[dir:lower()] or FILEMAN:DoesFileExist(dir .. DELETED_NOTE)) then
+		return
+	end
+	state.deletedDirs[dir:lower()] = nil
+	local group = dir:match("^/Songs/(.-)/$")
+	if group then ForgetCached(group) end
+	state.reloadFull = true
+	WriteNote(dir, {
+		"IN USE - KEEP THIS FOLDER",
+		"",
+		"Songs were downloaded into this folder again on " .. Stamp() .. ".",
+		"It is in use: do not delete it, whatever this file is called.",
+	})
+end
+
+-- Whether a pack is in the player's library, for everything that asks.
+--
+-- The engine's group list alone says no such thing about a pack emptied here.
+-- Until songs are reloaded it still holds the pack as it was; and a reload
+-- loads every song folder that is still there, emptied or not, as a song with
+-- no charts -- which the music wheel hides, but which keeps the group on the
+-- engine's list for as long as the folder stays on disk. Asked plainly, that
+-- list put a deleted pack back on the Installed tab after the next reload and
+-- refused to download it again ("already in your library").
+local function InLibrary(name)
+	if not (name and SONGMAN:DoesSongGroupExist(name)) then return false end
+	if state.deletedDirs[("/Songs/" .. name .. "/"):lower()] then return false end
+	for song in ivalues(SONGMAN:GetSongsInGroup(name) or {}) do
+		if #song:GetAllSteps() > 0 then return true end
+	end
+	return false
 end
 
 -- cb(ok, message)
@@ -564,6 +660,7 @@ local function DeletePack(pack, cb)
 	state.removing = pack.name
 	Refresh()
 
+	ForgetCached(pack.name)
 	local wiped, failed = TruncateTree(dir)
 	state.removing = nil
 
@@ -572,6 +669,7 @@ local function DeletePack(pack, cb)
 			or "that pack folder was already empty")
 		return
 	end
+	MarkDeleted(dir)
 
 	-- The group goes from the wheel on the next reload, which the browser
 	-- already offers on the way out; say so rather than implying it is gone.
@@ -593,6 +691,8 @@ CB.DlBase           = DlBase
 CB.DlRequest        = DlRequest
 CB.FetchDlBase      = FetchDlBase
 CB.GroupDirFor      = GroupDirFor
+CB.InLibrary        = InLibrary
+CB.KeepNote         = KeepNote
 CB.INST_COLS        = INST_COLS
 CB.INST_ROWS        = INST_ROWS
 CB.RAGEFILE_READ    = RAGEFILE_READ

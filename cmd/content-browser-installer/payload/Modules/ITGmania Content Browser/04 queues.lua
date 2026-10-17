@@ -56,7 +56,7 @@ end
 -- negative fraction means there is nothing to measure: unpacking happens in
 -- one blocking call that cannot report on itself.
 function DL.RowState(dl)
-	if dl.status == "installing" then return "unpacking", -1 end
+	if dl.status == "installing" then return "installing", -1 end
 	if dl.status == "done" then return "done", 1 end
 	if dl.status == "error" then return "failed", 0 end
 	if dl.total and dl.total > 0 then
@@ -78,7 +78,7 @@ end
 -- no such limit and is already running.
 local UP = {}
 
-UP.VERSION = "0.11"     -- what this module is; the installer reports the same
+UP.VERSION = "0.11.1"   -- what this module is; the installer reports the same
 UP.state   = nil       -- the last manifest answer about versions
 UP.asked   = false     -- ...and whether it has been asked yet this session
 UP.job     = nil       -- an update in flight

@@ -137,7 +137,7 @@ local function RowValue(key)
 		if n > 2 then return r.chosen[1] .. ", " .. r.chosen[2] .. "  +" .. (n - 2) .. " more" end
 		if r.authorsStatus == "loading" then return "loading the list..." end
 		if r.authorsStatus == "failed" then
-			return r.authorsOut and "unavailable: the relay is out of bandwidth"
+			return r.authorsOut and "unavailable for now"
 				or "list unavailable  (START to retry)"
 		end
 		return "Anyone  (START to choose)"
@@ -799,7 +799,7 @@ function CB.Screen.RipPacks(ui)
 	}
 	notice[#notice+1] = Def.BitmapText{
 		Font = "Common Bold",
-		Text = "OUT OF BANDWIDTH",
+		Text = "BACK SOON",
 		InitCommand = function(self) self:y(-34):zoom(0.42) end,
 		SMORefreshMessageCommand = function(self) self:diffuse(AccentColor()) end,
 	}
@@ -1061,7 +1061,7 @@ function CB.Screen.RipPacks(ui)
 				or (FormatBytes(pack.total or 0) .. " to fetch"))
 		elseif pack and r.phase == "done" then
 			if pack.relayOut then
-				text = string.format("%d songs added, synced %s   -   the relay ran out of bandwidth before the rest",
+				text = string.format("%d songs added, synced %s   -   the rest are unavailable for now",
 					pack.got, pack.sync)
 			else
 				text = string.format("%d songs added, synced %s%s   -   reload songs when you leave to play them",

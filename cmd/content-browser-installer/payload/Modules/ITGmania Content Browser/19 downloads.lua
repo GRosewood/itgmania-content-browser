@@ -12,6 +12,8 @@ local CB = ...
 local BROWSER_DATA_DIR = CB.BROWSER_DATA_DIR
 local DL               = CB.DL
 local DlRequest        = CB.DlRequest
+local InLibrary        = CB.InLibrary
+local KeepNote         = CB.KeepNote
 local LO               = CB.LO
 local PlaySfx          = CB.PlaySfx
 local Toast            = CB.Toast
@@ -29,6 +31,7 @@ local SMO_BASE         = CB.SMO_BASE
 local ScanInstalled    = CB.ScanInstalled
 local Sync             = CB.Sync
 local Trim             = CB.Trim
+local Trouble          = CB.Trouble
 local state            = CB.state
 
 -- ------------------------------------------------- where a download lands
@@ -144,13 +147,13 @@ local function EngineDownload(pack, dl)
 				return
 			end
 			dl.status = "error"
-			dl.msg = response.errorMessage or "network error"
+			dl.msg = Trouble(response, "pack download")
 			Refresh()
 			return
 		end
 		if response.statusCode ~= 200 then
 			dl.status = "error"
-			dl.msg = "HTTP " .. tostring(response.statusCode)
+			dl.msg = Trouble(response, "pack download")
 			Refresh()
 			return
 		end
@@ -160,7 +163,7 @@ local function EngineDownload(pack, dl)
 		end
 		if not contentType:find("zip") then
 			dl.status = "error"
-			dl.msg = "server did not return a zip"
+			dl.msg = "the download wasn't a pack - try again later"
 			Refresh()
 			return
 		end
@@ -174,6 +177,8 @@ local function EngineDownload(pack, dl)
 			for dir in ivalues(FILEMAN:GetDirListing("/Songs/", true, false)) do
 				if not before[dir] then groups[#groups+1] = dir end
 			end
+			-- a pack downloaded again lands in the folder its deletion emptied
+			KeepNote("/Songs/" .. pack.name .. "/")
 			dl.status = "done"
 			dl.finishedAt = GetTimeSinceStart()
 			dl.groups = groups
@@ -192,7 +197,7 @@ local function EngineDownload(pack, dl)
 			end
 		else
 			dl.status = "error"
-			dl.msg = "unzip failed"
+			dl.msg = "it couldn't be installed"
 		end
 		Refresh()
 	end
@@ -218,7 +223,7 @@ local function StartDownload(pack)
 		return
 	end
 	-- already on disk: removing it is the only way to ask for it again
-	if SONGMAN:DoesSongGroupExist(pack.name) then
+	if InLibrary(pack.name) then
 		return
 	end
 
@@ -239,7 +244,7 @@ end
 local function DownloadLoaded(dl)
 	if not (dl and dl.groups) then return false end
 	for group in ivalues(dl.groups) do
-		if SONGMAN:DoesSongGroupExist(group) then return true end
+		if InLibrary(group) then return true end
 	end
 	return false
 end
@@ -389,8 +394,7 @@ function DL.StartSong(pack, song)
 
 	local root = WebBase() .. "/api/songzip/" .. id .. "/" .. UrlEncode(title)
 	if not NETWORK:IsUrlAllowed(root) then
-		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
-		return false, host .. " is missing from HttpAllowHosts"
+		return false, "this needs network access - run the Content Browser installer again"
 	end
 
 	-- which singles pack it belongs in, decided here from what SMO says so
@@ -432,7 +436,7 @@ function DL.StartSong(pack, song)
 		if response.error ~= nil or response.statusCode ~= 200 then
 			dl.status = "error"
 			dl.msg = RelayOut(response) and RELAY_OUT_WHY
-				or response.errorMessage or ("HTTP " .. tostring(response.statusCode))
+				or Trouble(response, "song download")
 			Refresh()
 			return
 		end
@@ -442,14 +446,17 @@ function DL.StartSong(pack, song)
 		local dest = "/Songs/" .. folder .. "/"
 		if not FILEMAN:Unzip("/Downloads/" .. response.file, dest, 0) then
 			dl.status = "error"
-			dl.msg = "unzip failed"
+			dl.msg = "it couldn't be installed"
 			Refresh()
 			return
 		end
+		KeepNote(dest)
 
 		-- The singles pack declares its sync once, so every song in it
-		-- plays at the offset it was authored for.
-		if not FILEMAN:DoesFileExist(dest .. "Pack.ini") then
+		-- plays at the offset it was authored for. A Pack.ini of no bytes is
+		-- what deleting the folder left, and declares nothing.
+		if not FILEMAN:DoesFileExist(dest .. "Pack.ini")
+		   or FILEMAN:GetFileSizeBytes(dest .. "Pack.ini") == 0 then
 			local nl = string.char(10)
 			local f = RageFileUtil:CreateRageFile()
 			if f:Open(dest .. "Pack.ini", RAGEFILE_WRITE) then
@@ -519,8 +526,7 @@ function DL.Patch(row, p)
 	local url = WebBase() .. "/api/packpatch/" .. p.id .. "?v=" .. p.v
 		.. "&f=" .. PATCH.Ranges(p.want)
 	if not NETWORK:IsUrlAllowed(url) then
-		local host = WebBase():match("^https?://([^/:]+)") or WebBase()
-		return false, host .. " is missing from HttpAllowHosts"
+		return false, "this needs network access - run the Content Browser installer again"
 	end
 
 	-- the offsets this copy plays at, read before the unzip writes over them
@@ -557,7 +563,7 @@ function DL.Patch(row, p)
 			elseif RelayOut(response) then
 				dl.msg = RELAY_OUT_WHY
 			else
-				dl.msg = response.errorMessage or ("HTTP " .. tostring(response.statusCode))
+				dl.msg = Trouble(response, "pack update")
 			end
 			Refresh()
 			return
@@ -566,7 +572,7 @@ function DL.Patch(row, p)
 		dl.status = "installing"
 		if not FILEMAN:Unzip("/Downloads/" .. response.file, row.dir, p.strip or 0) then
 			dl.status = "error"
-			dl.msg = "unzip failed"
+			dl.msg = "it couldn't be installed"
 			Refresh()
 			return
 		end
@@ -658,7 +664,7 @@ function DL.Ask(pack)
 		return
 	end
 	local dl = state.downloads[pack.id]
-	if SONGMAN:DoesSongGroupExist(pack.name) then
+	if InLibrary(pack.name) then
 		PlaySfx("invalid")
 		Toast(pack.name .. " is already in your library"
 			.. " - remove it from the Installed tab first")
