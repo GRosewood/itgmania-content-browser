@@ -30,6 +30,7 @@ local state           = CB.state
 -- be copied here -- the copy would be the nil they hold right now, forever.
 -- Reached through the shared table at call time instead.
 local function ApplyFilterRefetch(...) return CB.ApplyFilterRefetch(...) end
+local function FeaturedStep(...) return CB.FeaturedStep(...) end
 local function RefreshLevelView(...) return CB.RefreshLevelView(...) end
 local function Upstream(...) return CB.Upstream(...) end
 
@@ -211,6 +212,9 @@ FetchPackTypes = function()
 			state.smoById = byId
 			-- the beginner list is a join against this, and may be waiting
 			if RefreshLevelView then RefreshLevelView() end
+			-- so may the popular grid, which also waits on arrowcloud's two
+			-- lists: when this lands after them, nothing else wakes it
+			FeaturedStep()
 
 			-- the current view was built unfiltered; rebuild it now that the
 			-- filter can actually apply (only if the user is still on page 1)

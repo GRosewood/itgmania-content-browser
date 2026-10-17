@@ -1,10 +1,10 @@
 {
-  "version": "0.13",
-  "notes": "Rip Packs: a booster pack you keep now shows as Kept in the recent rips on itgcontent.net, where anyone can download the same pack.",
+  "version": "0.14",
+  "notes": "Popular Packs: the grid no longer sometimes stays stuck finding packs, with its banners spinning, when you open the browser.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.13/itgmania-content-browser-module-0.13.zip",
-    "sha256": "0b5c12471a2e6a14c0c8a27a2b643818d11c2cc65ef8e2a95d502906d909fb44",
-    "bytes": 394926
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.14/itgmania-content-browser-module-0.14.zip",
+    "sha256": "8571c5c2fe79a25c997e08bb88f973aa8398a39001cd91c27870cbaa4fcf4c80",
+    "bytes": 395003
   },
   "minHelper": "0.5"
 }
