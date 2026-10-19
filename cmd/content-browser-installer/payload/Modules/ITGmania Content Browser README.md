@@ -247,8 +247,14 @@ download and install packs without ever leaving the game.
   sound to go with it, and deals fifteen cards, each turning face up as it
   lands. A card shows the song's banner (a stand-in pulses while it loads),
   its Expert meter on a badge, the year it is from (when its pack's dates are
-  its own), the title, who charted it and the pack it came from. The pack's hardest chart is the gold card, marked HARDEST — every card
+  its own) and its BPM, the title, who charted it and the pack it came from. The pack's hardest chart is the gold card, marked HARDEST — every card
   tied for it, as long as no more than three are.
+
+  The BPM is the one the chart's author put on it (#DISPLAYBPM), or else the
+  range of the tempos the Expert chart holds for a second or more, so a
+  one-beat gimmick spike is left out; "???" means the chart hides it. Its
+  colour says how fast the song plays, going by the tempo it holds longest:
+  blue under 140, orange from 140 to 180, red from 180.
 
   **Nothing is downloaded yet.** The button under the options turns into
   **KEEP** and **RE-RIP**. RE-RIP throws the cards back and rips a new set with
@@ -257,7 +263,11 @@ download and install packs without ever leaving the game.
   folder of its own, **Content Booster Pack *n* - *date***, and downloads its
   songs one at a time, the same way a single song comes. The button fills as
   they arrive, a wheel turns on the card whose song is on its way, and each
-  card lights up as its song lands. A booster is roughly 100 to 250 MB, and
+  card lights up as its song lands. Once the songs are in, the pack gets a
+  banner of its own for the music wheel: its wrapper torn open on a wall of
+  its cards, the hardest in gold, with its number, what it was ripped with
+  and the day, drawn by itgcontent.net and kept in the folder as
+  `banner.jpg`. A booster is roughly 100 to 250 MB, and
   the reload the browser offers when you leave brings it in. Settings narrow
   enough to find fewer than fifteen songs make a smaller pack and say so.
 

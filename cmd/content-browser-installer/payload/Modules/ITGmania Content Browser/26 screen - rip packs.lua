@@ -50,6 +50,17 @@ local INFO_Y     = 22
 local TITLE_ZOOM, CREDIT_ZOOM, YEAR_ZOOM = 0.42, 0.36, 0.34
 local GOLD       = { 1.00, 0.80, 0.30 }
 
+-- A song's BPM in the colour of how fast it plays -- slow under 140, medium
+-- to 180, fast from there -- as the site's cards colour it; grey when the
+-- chart hides its BPM. The medium is an orange well clear of the gold.
+local function BpmColor(bpm)
+	bpm = tonumber(bpm) or 0
+	if bpm <= 0 then return { 0.6, 0.6, 0.63, 1 } end
+	if bpm < 140 then return { 0.49, 0.83, 0.99, 1 } end
+	if bpm < 180 then return { 0.98, 0.57, 0.24, 1 } end
+	return { 0.98, 0.44, 0.52, 1 }
+end
+
 -- the sound of the pack tearing open, when it is there to play
 local TEAR = LO.ICONS .. "tear.wav"
 if not FILEMAN:DoesFileExist(TEAR) then TEAR = nil end
@@ -687,25 +698,29 @@ function CB.Screen.RipPacks(ui)
 			end,
 		}
 		front[#front+1] = badge
-		-- the year, the title and who charted it, as one block: the title takes
-		-- two lines at most, the year sits over it when the song has one and the
-		-- credit under however many lines it took, so the one command that sets
-		-- the texts also measures and places them
+		-- the year and the BPM, the title and who charted it, as one block: the
+		-- title takes two lines at most, the year and the BPM share the line over
+		-- it, side by side, when the song has either, and the credit sits under
+		-- however many lines the title took, so the one command that sets the
+		-- texts also measures and places them
 		front[#front+1] = Def.ActorFrame{
 			InitCommand = function(self) self:y(INFO_Y) end,
 			SMORefreshMessageCommand = function(self)
 				local song = Song(i)
 				local title, credit = self:GetChild("Title"), self:GetChild("Credit")
-				local year = self:GetChild("Year")
+				local year, bpm = self:GetChild("Year"), self:GetChild("Bpm")
 				if not song then
 					title:settext("")
 					credit:settext("")
 					year:settext("")
+					bpm:settext("")
 					return
 				end
 				local y = tonumber(song.year) or 0
 				year:settext(y > 0 and tostring(y) or "")
 				if IsFoil(i) then year:diffuse(GOLD[1], GOLD[2], GOLD[3], 1) else year:diffuse(AccentColor()) end
+				local tempo = tostring(song.bpmText or "")
+				bpm:settext(tempo ~= "" and (tempo .. " BPM") or ""):diffuse(BpmColor(song.bpm))
 				FitLines(title, tostring(song.title or ""), 2)
 				if song.state == "failed" then
 					credit:settext("could not be downloaded"):diffuse(1, 0.55, 0.55, 1)
@@ -713,18 +728,31 @@ function CB.Screen.RipPacks(ui)
 					local who = tostring(song.credit or "")
 					credit:settext(who ~= "" and ("by " .. who) or ""):diffuse(0.7, 0.7, 0.72, 1)
 				end
-				local yh = year:GetText() ~= "" and year:GetHeight() * YEAR_ZOOM or 0
+				-- the line over the title: the year and the BPM as one centred pair
+				local yw = year:GetText() ~= "" and year:GetZoomedWidth() or 0
+				local bw = bpm:GetText() ~= "" and bpm:GetZoomedWidth() or 0
+				local pair = (yw > 0 and bw > 0) and 5 or 0
+				local lw = yw + pair + bw
+				year:x(-lw/2 + yw/2)
+				bpm:x(lw/2 - bw/2)
+				local yh = lw > 0 and year:GetHeight() * YEAR_ZOOM or 0
 				local ygap = yh > 0 and 1 or 0
 				local th = title:GetHeight() * TITLE_ZOOM
 				local ch = credit:GetText() ~= "" and credit:GetHeight() * CREDIT_ZOOM or 0
 				local gap = ch > 0 and 3 or 0
 				local total = yh + ygap + th + gap + ch
 				year:y(-total/2 + yh/2)
+				bpm:y(-total/2 + yh/2)
 				title:y(-total/2 + yh + ygap + th/2)
 				credit:y(total/2 - ch/2)
 			end,
 			Def.BitmapText{
 				Name = "Year",
+				Font = "Common Normal",
+				InitCommand = function(self) self:zoom(YEAR_ZOOM) end,
+			},
+			Def.BitmapText{
+				Name = "Bpm",
 				Font = "Common Normal",
 				InitCommand = function(self) self:zoom(YEAR_ZOOM) end,
 			},

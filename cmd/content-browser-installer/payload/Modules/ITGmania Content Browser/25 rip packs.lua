@@ -294,6 +294,8 @@ local function WritePackIni(pack)
 		"Version=1",
 		"SyncOffset=" .. pack.sync,
 	}
+	-- the pack's own banner, once it is in (FetchBanner)
+	if pack.banner then lines[#lines+1] = "Banner=" .. pack.banner end
 	if pack.got + pack.failed > 0 then
 		lines[#lines+1] = "#"
 		for song in ivalues(pack.songs) do
@@ -323,7 +325,55 @@ end
 
 local Next   -- the songs come one at a time; each lands and asks for the next
 
+-- The pack's own banner, as the music wheel shows it: its wrapper, foil torn
+-- open on a wall of the songs that landed in it, drawn by the site from what
+-- the pack is (/api/boosterbanner) and copied in beside them. Asked for once
+-- the songs are in -- the game asks for one thing at a time, and the songs
+-- come first -- while the pack still counts as downloading, so the reload
+-- waits for it. A banner that cannot be had costs the pack only its banner.
+local function FetchBanner(pack, done)
+	local art, meters = {}, {}
+	for song in ivalues(pack.songs) do
+		if song.state == "done" then
+			art[#art+1] = tostring(song.art or ""):match("^/api/songart/(.+)$") or "-"
+			meters[#meters+1] = tostring(math.floor(tonumber(song.meter) or 0))
+		end
+	end
+	local url = WebBase() .. "/api/boosterbanner?" .. NETWORK:EncodeQueryParameters{
+		n = tostring(pack.n),
+		d = pack.date,
+		e = table.concat(pack.eras or {}, ","),
+		lo = tostring(pack.lo),
+		hi = tostring(pack.hi),
+		a = table.concat(art, ","),
+		m = table.concat(meters, ","),
+	}
+	if not NETWORK:IsUrlAllowed(url) then return done() end
+	local file = "cb-rip-" .. pack.n .. "-banner.jpg"
+	NETWORK:HttpRequest{
+		url = url,
+		downloadFile = file,
+		connectTimeout = 10,
+		transferTimeout = 30,
+		onResponse = function(response)
+			if state.retired then return end
+			if response.error == nil and response.statusCode == 200
+					and FILEMAN:Copy("/Downloads/" .. file, pack.dest .. "banner.jpg") then
+				pack.banner = "banner.jpg"
+			else
+				Trouble(response, "booster banner")
+			end
+			done()
+		end,
+	}
+end
+
 local function Finish(pack)
+	-- the banner first, then the rest of this again with it in
+	if pack.got > 0 and not pack.bannerAsked then
+		pack.bannerAsked = true
+		return FetchBanner(pack, function() Finish(pack) end)
+	end
 	local r = state.rip
 	local h = RIP.History()
 	h.count = math.max(h.count, pack.n)

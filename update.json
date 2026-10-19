@@ -1,10 +1,10 @@
 {
-  "version": "0.14",
-  "notes": "Popular Packs: the grid no longer sometimes stays stuck finding packs, with its banners spinning, when you open the browser.",
+  "version": "0.15",
+  "notes": "Rip Packs: every card now shows its song's BPM, colored by how fast it plays - blue under 140, orange from 140 to 180, red from 180. A booster pack you keep gets a banner of its own on the music wheel: its wrapper torn open on a wall of its cards, the hardest in gold.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.14/itgmania-content-browser-module-0.14.zip",
-    "sha256": "8571c5c2fe79a25c997e08bb88f973aa8398a39001cd91c27870cbaa4fcf4c80",
-    "bytes": 395003
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.15/itgmania-content-browser-module-0.15.zip",
+    "sha256": "98681f8950a5b47594053ce6b3b37bdd3cb5efef3918892133be366347ee0032",
+    "bytes": 396108
   },
   "minHelper": "0.5"
 }
