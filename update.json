@@ -1,10 +1,10 @@
 {
-  "version": "0.15",
-  "notes": "Rip Packs: every card now shows its song's BPM, colored by how fast it plays - blue under 140, orange from 140 to 180, red from 180. A booster pack you keep gets a banner of its own on the music wheel: its wrapper torn open on a wall of its cards, the hardest in gold.",
+  "version": "0.16",
+  "notes": "Chart previews now draw holds and rolls whole, in your own noteskin: the body runs down to its tail, and a held arrow stays lit on its receptor until it lets go. Rip Packs: every booster pack you keep joins one series, Content Browser Booster Packs, so sorting the music wheel by series keeps them all in one folder.",
   "module": {
-    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.15/itgmania-content-browser-module-0.15.zip",
-    "sha256": "98681f8950a5b47594053ce6b3b37bdd3cb5efef3918892133be366347ee0032",
-    "bytes": 396108
+    "url": "https://github.com/GRosewood/itgmania-content-browser/releases/download/v0.16/itgmania-content-browser-module-0.16.zip",
+    "sha256": "d85c5be20bdcb82839084eb5a62341d6799f00a4d8a8c08f48c639c55fea8c95",
+    "bytes": 399957
   },
   "minHelper": "0.5"
 }

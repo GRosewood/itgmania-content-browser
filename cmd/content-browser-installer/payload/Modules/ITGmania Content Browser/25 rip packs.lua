@@ -74,6 +74,10 @@ RIP.ERA_WORDS = {
 }
 RIP.ERA_SHORT = { modern = "Modern", mid = "Mid-era", vintage = "Vintage" }
 
+-- Every booster pack names the same series in its Pack.ini, so the music
+-- wheel's series sort keeps them together in a folder of their own.
+RIP.SERIES = "Content Browser Booster Packs"
+
 local HISTORY = BROWSER_DATA_DIR .. "boosters.txt"
 local METER_MAX = 30
 
@@ -279,9 +283,10 @@ local function Majority(songs)
 	return (null * 2 > #songs) and "NULL" or "ITG"
 end
 
--- The pack's Pack.ini: its one sync, and -- once the songs are in -- a line
--- for each saying where it came from, the sync that pack declared, and
--- whether its offsets were moved to this one. The songs come from packs that
+-- The pack's Pack.ini: its one sync, the series every booster pack shares,
+-- and -- once the songs are in -- a line for each saying where it came from,
+-- the sync that pack declared, and whether its offsets were moved to this
+-- one. The songs come from packs that
 -- disagree, and their own files can disagree too (an .sm left behind by its
 -- .ssc, say), so the folder alone cannot tell anyone what was done to it.
 local function WritePackIni(pack)
@@ -293,6 +298,7 @@ local function WritePackIni(pack)
 		"# and taken as ITG -- the game's default -- if its pack declared none.",
 		"Version=1",
 		"SyncOffset=" .. pack.sync,
+		"Series=" .. RIP.SERIES,
 	}
 	-- the pack's own banner, once it is in (FetchBanner)
 	if pack.banner then lines[#lines+1] = "Banner=" .. pack.banner end
@@ -319,6 +325,39 @@ local function WritePackIni(pack)
 		f:Close()
 	end
 	f:destroy()
+end
+
+-- Boosters kept before they named the series are given it, once a session,
+-- the line going in after their Version, so every booster pack sits in the
+-- one folder. The game reads it at its next start: a reload that only looks
+-- for new songs never reads a pack it already has again.
+function RIP.GroupBoosters()
+	local r = state.rip
+	if r.grouped then return end
+	r.grouped = true
+	for name in ivalues(FILEMAN:GetDirListing("/Songs/Content Booster Pack*", true, false)) do
+		local path = "/Songs/" .. name .. "/Pack.ini"
+		local f = RageFileUtil:CreateRageFile()
+		local body
+		if f:Open(path, RAGEFILE_READ) then
+			body = f:Read() or ""
+			f:Close()
+		end
+		f:destroy()
+		if body and body:find("%[Group%]") and not ("\n" .. body):find("\n[ \t]*Series[ \t]*=") then
+			-- in the file's own line endings, as whatever wrote it had them
+			local eol = body:find("\r\n", 1, true) and "\r\n" or "\n"
+			local grouped, n = body:gsub("(\n[ \t]*Version[ \t]*=[^\r\n]*)", "%1" .. eol .. "Series=" .. RIP.SERIES, 1)
+			if n == 1 then
+				local w = RageFileUtil:CreateRageFile()
+				if w:Open(path, RAGEFILE_WRITE) then
+					w:Write(grouped)
+					w:Close()
+				end
+				w:destroy()
+			end
+		end
+	end
 end
 
 -- ---------------------------------------------------------------- the rip
@@ -570,6 +609,7 @@ function RIP.Keep()
 
 	pack.sync = Majority(pack.songs)
 	WritePackIni(pack)
+	RIP.GroupBoosters()
 	SayKept(pack)
 
 	-- a download like any other: the ticker shows it, and the reload offer

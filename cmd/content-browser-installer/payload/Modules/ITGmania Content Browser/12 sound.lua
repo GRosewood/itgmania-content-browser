@@ -55,6 +55,7 @@ Snd.bars    = {}      -- the equalizer bars, once the tree exists
 Snd.charts  = nil     -- every difficulty of the song, from the relay
 Snd.chartIdx = 0      -- which of them is being shown
 Snd.notes   = nil     -- what that one does during the sample
+Snd.holds   = nil     -- ...and its holds and rolls, head to tail, by head
 Snd.lanes   = 0       -- 4 for a singles chart, 8 for a doubles one
 Snd.known   = {}      -- song title -> the difficulties a preview already found
 Snd.pick    = nil     -- the difficulty the popup is offering, while it is open
@@ -62,6 +63,9 @@ Snd.want    = nil     -- the difficulty this attempt was asked to open on
 Snd.packId  = nil     -- which pack the playing song came from
 Snd.winFade = 0       -- the chart window's own fade, 0..1
 Snd.LANE_POOL = 8     -- note actors per column; a jack at 16ths fills about six
+-- hold bodies per column: the window shows under a second of the chart, and
+-- a column rarely has more than two holds in that
+Snd.HOLD_POOL = 3
 Snd.HIT     = 0.085   -- how close to the moment a receptor counts as struck
 -- A real read speed, so this reads like the game rather than like a
 -- decoration. The numbers come out of how StepMania moves a note field: a
@@ -96,6 +100,12 @@ Snd.QSPACE_Y = 0
 Snd.QCOUNT   = 8
 Snd.fired   = {}      -- lane -> the last note index that struck it
 Snd.pressAt = {}      -- lane -> when it was pressed, so it can be let go
+Snd.holdShowing = {}  -- lane -> "hold" or "roll" while its hold explosion is lit
+Snd.holdAF  = {}      -- lane -> slot -> the hold pieces that slot can draw
+-- Where a skin starts and stops a hold's body, in its own pixels from the
+-- head and the tail: the metrics NoteDisplay reads. Nearly every skin says 0.
+Snd.HOLD_FROM_HEAD = 0
+Snd.HOLD_TO_TAIL   = 0
 Snd.bpmText = nil     -- the tempo as the pack lists it, for the preview
 Snd.BARS    = 16
 Snd.BAR_W   = 3
@@ -169,14 +179,28 @@ function Snd.SelectChart(index)
 	Snd.chartIdx = index
 	Snd.lanes = tonumber(chart.lanes) or 0
 	Snd.notes = (type(chart.notes) == "table" and #chart.notes > 0) and chart.notes or nil
-	-- Let go of anything the last chart left held. The noteskin's Press is a
-	-- pose it holds until Lift, and dropping the bookkeeping without playing
-	-- Lift stranded a receptor lit for the rest of the preview.
+	-- a relay from before holds were sent has none, and draws heads alone
+	Snd.holds = (type(chart.holds) == "table" and #chart.holds > 0) and chart.holds or nil
+	Snd.LetGo()
+	Snd.noteFrom, Snd.fired = 1, {}
+end
+
+-- Let go of everything the last chart held down. The noteskin's Press is a
+-- pose it holds until Lift, and its hold explosion stays lit until it hears
+-- HoldingOff; dropping the bookkeeping without either stranded a receptor
+-- lit, or a hold glowing on it, for the rest of the preview.
+function Snd.LetGo()
 	for lane, at in pairs(Snd.pressAt or {}) do
 		local rec = at and Snd.receptors and Snd.receptors[lane]
 		if rec then pcall(rec.playcommand, rec, "Lift") end
 	end
-	Snd.noteFrom, Snd.fired, Snd.pressAt = 1, {}, {}
+	for lane, kind in pairs(Snd.holdShowing or {}) do
+		local boom = Snd.flashes and Snd.flashes[lane]
+		if boom then
+			pcall(boom.playcommand, boom, kind == "roll" and "RollOff" or "HoldingOff")
+		end
+	end
+	Snd.pressAt, Snd.holdShowing = {}, {}
 end
 
 -- Which difficulty to open on: Expert, always, where the song has one.
@@ -413,6 +437,12 @@ function Snd.ReadQuant(skin)
 		"TapNoteNoteColorTextureCoordSpacingY", 0)
 	local n = metric(NOTESKIN.GetMetricIForNoteSkin, "TapNoteNoteColorCount", 8)
 	Snd.QCOUNT = (n and n > 0) and math.floor(n) or 8
+	-- and where it starts and stops a hold's body, which NoteDisplay adds to
+	-- the head and to the tail
+	Snd.HOLD_FROM_HEAD = metric(NOTESKIN.GetMetricIForNoteSkin,
+		"StartDrawingHoldBodyOffsetFromHead", 0)
+	Snd.HOLD_TO_TAIL = metric(NOTESKIN.GetMetricIForNoteSkin,
+		"StopDrawingHoldBodyOffsetFromTail", 0)
 end
 
 -- Where along that strip a note of this quantization sits.
@@ -423,6 +453,85 @@ function Snd.QuantSlide(note)
 	local q = math.floor(tonumber(note.q) or 0)
 	q = Clamp(q, 0, Snd.QCOUNT - 1)
 	return Snd.QSPACE_X * q, Snd.QSPACE_Y * q
+end
+
+-- One hold or roll, drawn from a pool slot: its body from top -- the head,
+-- or the receptor once it is held -- down to its tail, and the cap under the
+-- tail, both cut off at bottom, where notes come into view. The pieces are
+-- the skin's own, picked as NoteDisplay picks them: the inactive pair on the
+-- way up, the active pair while held. Every other look the slot holds is put
+-- away.
+function Snd.PlaceHold(set, roll, held, x, top, tail, bottom)
+	local kind = roll and "roll" or "hold"
+	local look = held and "held" or "idle"
+	-- the skin's own offsets, in its pixels at the field's zoom
+	top = top + Snd.HOLD_FROM_HEAD * Snd.MINI
+	tail = tail + Snd.HOLD_TO_TAIL * Snd.MINI
+	for _, piece in ipairs(set.pieces) do
+		local mine = piece.kind == kind and piece.look == look
+		if mine and piece.part == "body" then
+			-- half a pixel into the cap, the overshoot NoteDisplay draws so
+			-- no seam shows between them
+			Snd.PlaceHoldBody(piece, x, top, math.min(tail + 0.5, bottom), tail)
+		elseif mine then
+			Snd.PlaceHoldCap(piece.actor, x, tail + 0.5, bottom)
+		else
+			piece.actor:visible(false)
+		end
+	end
+	local bar = set.bar
+	if bar then
+		local stop = math.min(tail, bottom)
+		bar:visible(stop > top)
+		if stop > top then
+			bar:xy(x, (top + stop) / 2):setsize(Snd.ARROW * 0.4, stop - top)
+		end
+	end
+end
+
+-- A slot put away whole.
+function Snd.HideHold(set)
+	if not set then return end
+	for _, piece in ipairs(set.pieces) do piece.actor:visible(false) end
+	if set.bar then set.bar:visible(false) end
+end
+
+-- A hold's body, tiled at the skin's own height and anchored on its tail as
+-- NoteDisplay::DrawHoldPart anchors one: the texture's bottom edge lands on
+-- the tail, so the pattern rides up with the tail while a held body
+-- shortens, and the part tile is the one at the head. customtexturerect
+-- turns on the wrapping that repeats it. The frame is the one the sprite is
+-- showing, so a body that animates -- cel's lit roll -- still does.
+function Snd.PlaceHoldBody(piece, x, top, bottom, tail)
+	local body = piece.actor
+	local tile = body:GetHeight() * Snd.MINI
+	local tex = body:GetTexture()
+	if bottom - top < 0.5 or tile <= 0 or not tex then
+		body:visible(false)
+		return
+	end
+	local frame = body:GetState()
+	if piece.frames then frame = piece.frames[frame + 1] or 0 end
+	frame = Clamp(math.floor(frame), 0, math.max(0, tex:GetNumFrames() - 1))
+	local l, t, r, b = tex:GetTextureCoordRect(frame)
+	local perPixel = (b - t) / tile
+	body:visible(true)
+	body:customtexturerect(l, b - (tail - top) * perPixel, r, b - (tail - bottom) * perPixel)
+	body:zoomx(Snd.MINI):zoomtoheight(bottom - top)
+	body:xy(x, (top + bottom) / 2)
+end
+
+-- A hold's bottom cap, hung from top at the skin's size and cut off at
+-- bottom, the way a note past the window is not drawn at all.
+function Snd.PlaceHoldCap(cap, x, top, bottom)
+	local h = cap:GetHeight() * Snd.MINI
+	if h <= 0 or top >= bottom then
+		cap:visible(false)
+		return
+	end
+	cap:visible(true)
+	cap:zoom(Snd.MINI):xy(x, top + h / 2)
+	cap:cropbottom(Clamp((top + h - bottom) / h, 0, 1))
 end
 
 
@@ -456,10 +565,11 @@ function Snd.Stop(quiet)
 	if was == "playing" then SOUND:DimMusic(1, 0) end
 	Snd.status, Snd.song, Snd.message = "idle", nil, nil
 	Snd.prog, Snd.bpm, Snd.len, Snd.startedAt = nil, 0, 0, 0
-	Snd.notes, Snd.lanes, Snd.noteFrom = nil, 0, 1
+	Snd.notes, Snd.holds, Snd.lanes, Snd.noteFrom = nil, nil, 0, 1
 	Snd.charts, Snd.chartIdx = nil, 0
 	Snd.want, Snd.packId = nil, nil
-	Snd.fired, Snd.pressAt, Snd.bpmText = {}, {}, nil
+	Snd.LetGo()
+	Snd.fired, Snd.bpmText = {}, nil
 	Snd.index = nil
 	if was ~= "idle" and not quiet then Refresh() end
 end

@@ -159,7 +159,11 @@ download and install packs without ever leaving the game.
   own noteskin**, at a read speed derived the way the game derives one (a C-mod
   scaled by mini). Arrows are coloured by quantization the way ITG colours them
   — quarters red, eighths blue, sixteenths green — and stop at the receptors,
-  which flash with the noteskin's own explosion as each one lands.
+  which flash with the noteskin's own explosion as each one lands. Holds and
+  rolls are drawn whole, out of the noteskin's own hold pieces: the body runs
+  from the arrow down to its tail, and once a hold is struck its arrow stays
+  on the receptor, glowing, until it lets go — the way a held hold looks in a
+  song.
 
   Every difficulty the song has is listed under the title, colour-coded like
   the wheel, and **Up/Down moves between them** with nothing fetched: the whole
@@ -280,6 +284,11 @@ download and install packs without ever leaving the game.
   `Pack.ini` lists every song with the pack it came from, the sync that pack
   declared, and whether its offsets were moved, and the downloads leave out
   the `.oldsync` backups a resync puts beside the charts.
+
+  Every booster's `Pack.ini` also names the series **Content Browser Booster
+  Packs**, so sorting the music wheel by series keeps all of them in one
+  folder. Boosters kept before this are given the line the next time you keep
+  one, and join the folder when the game next starts.
 
   Every pack ripped shows on [itgcontent.net/rips](https://itgcontent.net/rips)
   — its options and its songs, nothing of who ripped it. KEEP tells the site

@@ -168,7 +168,7 @@ function CB.Screen.ChartWindow(ui, detail)
 			self:wrapwidthpixels((CW_W - 40)/0.45)
 		end,
 		SMORefreshMessageCommand = function(self)
-			local quiet = Snd.ChartOn() and Snd.notes == nil
+			local quiet = Snd.ChartOn() and Snd.notes == nil and Snd.holds == nil
 			self:visible(quiet)
 			if quiet then
 				self:settext("nothing in this part of the song")
@@ -384,6 +384,85 @@ function CB.Screen.ChartWindow(ui, detail)
 					self:rotationz(Snd.LaneRot(lane)):visible(false)
 				end,
 			}
+		end
+	end
+
+	-- Holds and rolls: the body each one trails from its head down to its
+	-- tail, and the cap that closes it, out of the skin's own pieces under the
+	-- names gameplay asks a noteskin for (NoteDisplay::Load) -- the inactive
+	-- pair on the way up, the active pair while held. Built here, between the
+	-- receptors and the arrows, so a body runs under its arrow the way it does
+	-- in a song. A skin that has only one look of a piece lends it to the
+	-- other, a roll without a piece borrows the hold's, and with no pieces at
+	-- all a hold is a plain bar.
+	local function HoldPiece(column, kind, part, look)
+		local other = look == "Active" and "Inactive" or "Active"
+		return LO.NoteActor(column, kind .. " " .. part .. " " .. look)
+			or LO.NoteActor(column, kind .. " " .. part .. " " .. other)
+			or (kind == "Roll" and HoldPiece(column, "Hold", part, look))
+			or nil
+	end
+	-- The frame each animation state shows, off the piece's own definition:
+	-- a sprite whose states revisit frames (cel's lit roll goes 0 1 2 3 2 1)
+	-- says so there, and its texture only knows the frames.
+	local function StateFrames(def)
+		local frames = {}
+		if type(def.Frames) == "table" then
+			for i, state in ipairs(def.Frames) do
+				frames[i] = type(state) == "table" and tonumber(state.Frame) or 0
+			end
+		else
+			for i = 0, 255 do
+				local frame = def[string.format("Frame%04d", i)]
+				if frame == nil then break end
+				frames[i + 1] = tonumber(frame) or 0
+			end
+		end
+		return #frames > 0 and frames or nil
+	end
+	local LOOKS = { idle = "Inactive", held = "Active" }
+	for lane = 1, 8 do
+		local column = COLUMN[((lane - 1) % 4) + 1]
+		Snd.holdAF[lane] = {}
+		for slot = 1, Snd.HOLD_POOL do
+			local set = { pieces = {} }
+			Snd.holdAF[lane][slot] = set
+			local any = false
+			for _, kind in ipairs({ "Hold", "Roll" }) do
+				for _, part in ipairs({ "Body", "Bottomcap" }) do
+					for look, name in pairs(LOOKS) do
+						local def = HoldPiece(column, kind, part, name)
+						if def then
+							any = true
+							local piece = {
+								kind = kind:lower(),
+								look = look,
+								part = part == "Body" and "body" or "cap",
+								frames = StateFrames(def),
+							}
+							chartWin[#chartWin+1] = def .. {
+								InitCommand = function(self)
+									self:visible(false)
+									-- gameplay draws hold pieces as sprites, and
+									-- these are measured and tiled as one
+									if type(self.GetTexture) == "function" and self:GetTexture() then
+										piece.actor = self
+										set.pieces[#set.pieces+1] = piece
+									end
+								end,
+							}
+						end
+					end
+				end
+			end
+			if not any then
+				chartWin[#chartWin+1] = Def.Quad{
+					InitCommand = function(self)
+						set.bar = self
+						self:diffuse(1, 1, 1, 0.35):visible(false)
+					end,
+				}
+			end
 		end
 	end
 
@@ -639,6 +718,10 @@ function CB.Screen.ChartWindow(ui, detail)
 						if lifts and lifts[slot] then lifts[slot]:visible(false) end
 						if mines and mines[slot] then mines[slot]:visible(false) end
 					end
+					local holdPool = Snd.holdAF[lane]
+					for slot = 1, Snd.HOLD_POOL do
+						Snd.HideHold(holdPool and holdPool[slot])
+					end
 
 					local rec = Snd.receptors[lane]
 					if rec then
@@ -708,6 +791,38 @@ function CB.Screen.ChartWindow(ui, detail)
 				end
 			end
 
+			-- The columns a hold or roll is being held in this instant. Holds
+			-- are ordered by head, so the walk stops at the first not yet
+			-- struck.
+			local holds = Snd.holds
+			local heldNow = {}
+			if holds then
+				for index = 1, #holds do
+					local h = holds[index]
+					if h.t > elapsed then break end
+					if h.e > elapsed then
+						heldNow[(tonumber(h.k) or 0) + 1] = (h.r == 1) and "roll" or "hold"
+					end
+				end
+			end
+			-- A held column lights the skin's hold explosion until it lets go,
+			-- the commands GhostArrowRow plays on the same actor in a song, and
+			-- keeps its receptor down (below) the way a held foot does.
+			if Snd.usingSkin then
+				for lane = 1, 8 do
+					local holding = heldNow[lane]
+					local was = Snd.holdShowing[lane]
+					if holding ~= was then
+						local boom = Snd.flashes[lane]
+						if boom then
+							if was then boom:playcommand(was == "roll" and "RollOff" or "HoldingOff") end
+							if holding then boom:playcommand(holding == "roll" and "RollOn" or "HoldingOn") end
+						end
+						Snd.holdShowing[lane] = holding
+					end
+				end
+			end
+
 			-- A note landing is an event, not a state. The noteskin's press
 			-- and explosion commands animate themselves once played -- that is
 			-- what they are for -- so playing them every frame would restart
@@ -751,10 +866,11 @@ function CB.Screen.ChartWindow(ui, detail)
 						end
 					end
 				end
-				-- and let go a moment after, the way a foot does
+				-- and let go a moment after, the way a foot does -- or once
+				-- the hold under it ends
 				for lane = 1, 8 do
 					local at = Snd.pressAt[lane]
-					if at and now - at > 0.09 then
+					if at and now - at > 0.09 and not heldNow[lane] then
 						Snd.pressAt[lane] = nil
 						local rec = Snd.receptors[lane]
 						if rec then rec:playcommand("Lift") end
@@ -850,6 +966,60 @@ function CB.Screen.ChartWindow(ui, detail)
 				end
 				end
 			end
+			-- Holds and rolls, each from its head down to its tail. One that
+			-- has been struck keeps its head on the receptor until it lets
+			-- go, as a held hold does in a song, its body shortening into it.
+			-- The head is the skin's tap, which is what cel and the stock
+			-- skins draw a hold head with.
+			local holdUsed = {}
+			for lane = 1, 8 do holdUsed[lane] = 0 end
+			if holds then
+				for index = 1, #holds do
+					local h = holds[index]
+					if CW_REC_Y + (h.t - elapsed) * Snd.PPS > CW_ENTER then break end
+					local lane = (tonumber(h.k) or 0) + 1
+					local set = Snd.holdAF[lane] and Snd.holdAF[lane][holdUsed[lane] + 1]
+					if h.e > elapsed and lane <= Snd.lanes and set then
+						holdUsed[lane] = holdUsed[lane] + 1
+						local held = h.t <= elapsed
+						local x = Snd.LaneX(lane, CW_MID)
+						local head = held and CW_REC_Y or CW_REC_Y + (h.t - elapsed) * Snd.PPS
+						Snd.PlaceHold(set, h.r == 1, held, x, head,
+							CW_REC_Y + (h.e - elapsed) * Snd.PPS, CW_ENTER)
+						local at = used[lane] + 1
+						local arrow = held and Snd.notesAF[lane] and Snd.notesAF[lane][at]
+						if arrow then
+							used[lane] = at
+							-- the slot's other notes put away, as the notes do
+							local lift = Snd.liftsAF[lane] and Snd.liftsAF[lane][at]
+							local mine = Snd.minesAF[lane] and Snd.minesAF[lane][at]
+							local edge = Snd.edgeAF[lane] and Snd.edgeAF[lane][at]
+							if lift then lift:visible(false) end
+							if mine then mine:visible(false) end
+							arrow:visible(true)
+							arrow:xy(x, CW_REC_Y)
+							if Snd.skinNotes then
+								arrow:texturetranslate(Snd.QuantSlide(h))
+							else
+								local tint = Snd.QuantColor(h)
+								arrow:diffuse(tint[1], tint[2], tint[3], 1)
+							end
+							if edge then
+								edge:visible(true)
+								edge:xy(x, CW_REC_Y)
+								edge:diffuse(1, 1, 1, 0.93)
+							end
+						end
+					end
+				end
+			end
+			for lane = 1, 8 do
+				local pool = Snd.holdAF[lane]
+				for slot = holdUsed[lane] + 1, Snd.HOLD_POOL do
+					Snd.HideHold(pool and pool[slot])
+				end
+			end
+
 			for lane = 1, 8 do
 				local pool, edges = Snd.notesAF[lane], Snd.edgeAF[lane]
 				local lifts = Snd.liftsAF[lane]
